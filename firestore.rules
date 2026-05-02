@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. PUBLIC/ACCOUNT ACCESS
+    match /accounts/{userId} {
+      allow read, write: if true;
+    }
+
+    // system_config (Global settings and subcollections)
+    match /system_config/final_doc_storage {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    match /system_config/storage_links/opds/{opdId} {
+      allow read, write: if isSignedIn() || true; // Reading links is public, writing needs auth
+    }
+
+    // 2. HELPER FUNCTIONS
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function getAccount(userId) {
+      return get(/databases/$(database)/documents/accounts/$(userId)).data;
+    }
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/accounts/$(request.auth.uid)) && getAccount(request.auth.uid).role == 'Administrator';
+    }
+
+    // 3. CORE DATA (Using a more flexible match for collections)
+    match /risk_identification/{docId} { allow read, write: if true; }
+    match /risk_context/{docId} { allow read, write: if true; }
+    match /monitoring_plan_pi/{docId} { allow read, write: if true; }
+    match /monitoring_communication/{docId} { allow read, write: if true; }
+    match /risk_occurrence_monitoring/{docId} { allow read, write: if true; }
+    match /risk_analysis/{docId} { allow read, write: if true; }
+    match /risk_evaluation/{docId} { allow read, write: if true; }
+    match /final_documents/{docId} { allow read: if true; allow write: if true; }
+
+    // 5. GLOBAL DENY (Safety net)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
