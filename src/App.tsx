@@ -90,12 +90,84 @@ interface MenuItem {
   icon: React.ElementType;
 }
 
+// --- Components ---
+
+/**
+ * A debounced input component that uses local state to avoid cursor jumps
+ * during real-time Firestore updates and supports browser undo/redo.
+ */
+function EditableTextarea({ value, onChange, disabled, placeholder, className, rows = 3 }: { 
+  value: string; 
+  onChange: (val: string) => void; 
+  disabled?: boolean; 
+  placeholder?: string; 
+  className?: string;
+  rows?: number;
+}) {
+  const [localValue, setLocalValue] = useState(value);
+
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  const handleBlur = () => {
+    if (localValue !== value) {
+      onChange(localValue);
+    }
+  };
+
+  return (
+    <textarea
+      className={className}
+      rows={rows}
+      value={localValue}
+      disabled={disabled}
+      placeholder={placeholder}
+      onChange={(e) => setLocalValue(e.target.value)}
+      onBlur={handleBlur}
+    />
+  );
+}
+
+function EditableInput({ value, onChange, disabled, placeholder, className, type = "text" }: { 
+  value: string; 
+  onChange: (val: string) => void; 
+  disabled?: boolean; 
+  placeholder?: string; 
+  className?: string;
+  type?: string;
+}) {
+  const [localValue, setLocalValue] = useState(value);
+
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  const handleBlur = () => {
+    if (localValue !== value) {
+      onChange(localValue);
+    }
+  };
+
+  return (
+    <input
+      type={type}
+      className={className}
+      value={localValue}
+      disabled={disabled}
+      placeholder={placeholder}
+      onChange={(e) => setLocalValue(e.target.value)}
+      onBlur={handleBlur}
+    />
+  );
+}
+
 // --- Menu Definitions ---
 const MENU_ITEMS_BASE: MenuItem[] = [
   { id: 1, title: 'I. PENETAPAN KONTEKS', icon: LayoutDashboard },
   { id: 2, title: 'II. IDENTIFIKASI RISIKO', icon: ShieldAlert },
   { id: 3, title: 'III. ANALISIS RISIKO', icon: BarChart3 },
-  { id: 4, title: 'IV. RISIKO AKTUAL', icon: Settings2 },
+  { id: 4, title: 'IV. EVALUASI RISIKO', icon: Settings2 },
   { id: 5, title: 'V. RENCANA PENANGANAN (RTP)', icon: RefreshCcw },
   { id: 6, title: 'VI. KOMUNIKASI PENGENDALIAN', icon: ClipboardList },
   { id: 7, title: 'VII. RENCANA MONITORING PI', icon: FileText },
@@ -112,12 +184,12 @@ import { db, auth, googleProvider } from './lib/firebase';
 
 export default function App() {
   const [user, setUser] = useState<{username: string; role: string; uid: string} | null>(() => {
-    const savedUser = localStorage.getItem('manrisk_user');
+    const savedUser = localStorage.getItem('isman_user');
     if (savedUser) {
       try {
         return JSON.parse(savedUser);
       } catch (e) {
-        localStorage.removeItem('manrisk_user');
+        localStorage.removeItem('isman_user');
       }
     }
     return null;
@@ -233,7 +305,7 @@ export default function App() {
         }
       } else {
         // Not signed in with Google, check manual session
-        const savedUser = localStorage.getItem('manrisk_user');
+        const savedUser = localStorage.getItem('isman_user');
         if (savedUser) {
           try {
             const parsed = JSON.parse(savedUser);
@@ -245,7 +317,7 @@ export default function App() {
               setUser({ username: accData.data().username, role: accData.data().role, uid: accData.id });
             } else {
               setUser(null);
-              localStorage.removeItem('manrisk_user');
+              localStorage.removeItem('isman_user');
             }
           } catch (e) {
             setUser(null);
@@ -1175,12 +1247,12 @@ export default function App() {
       if (role.toLowerCase() === 'administrator') role = 'Administrator';
       
       const u = { username: userData.username, role: role, uid: userData.uid };
-      localStorage.setItem('manrisk_user', JSON.stringify(u));
+      localStorage.setItem('isman_user', JSON.stringify(u));
       setUser(u);
       return;
     }
     try {
-      localStorage.removeItem('manrisk_user');
+      localStorage.removeItem('isman_user');
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
       console.error("Login failed", error);
@@ -1198,7 +1270,7 @@ export default function App() {
       console.error("Logout error:", error);
     }
     // Always clear local state regardless of Firebase auth state
-    localStorage.removeItem('manrisk_user');
+    localStorage.removeItem('isman_user');
     setUser(null);
     setViewingUser(null);
     setShowLogoutConfirm(false);
@@ -1262,9 +1334,13 @@ export default function App() {
         >
           <img 
             src="https://upload.wikimedia.org/wikipedia/id/8/87/Lambang_Papua_Tengah.png" 
-            alt="Logo Papua Tengah" 
-            className="w-40 h-auto drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] object-contain"
+            alt="Logo ISMAN" 
+            className="w-48 h-auto drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] object-contain"
             referrerPolicy="no-referrer"
+            onError={(e) => {
+              const target = e.target as HTMLImageElement;
+              target.src = "/logo.png"; // Fallback to local if remote fails
+            }}
           />
         </motion.div>
 
@@ -1274,11 +1350,13 @@ export default function App() {
           className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-100"
         >
           <div className="p-8 text-center border-b border-slate-100 bg-slate-50">
-            <h2 className="text-2xl font-black text-slate-900 uppercase italic">Pilih Jenis Risiko</h2>
-            <p className="text-slate-500 text-sm mt-1">Silahkan pilih kategori penilaian risiko untuk dilanjutkan</p>
+            <h1 className="text-3xl font-black text-blue-600 tracking-tighter uppercase italic">ISMAN</h1>
+            <p className="text-slate-600 text-[10px] font-black uppercase tracking-tight -mt-1 mb-4">Integrated Risk Management System</p>
+            <h2 className="text-xl font-bold text-slate-900 uppercase italic">Pilih Jenis Risiko</h2>
+            <p className="text-slate-500 text-xs mt-1">Silahkan pilih kategori penilaian risiko untuk dilanjutkan</p>
           </div>
           
-          <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-6 pb-12">
             <button 
               id="select-strategis"
               onClick={() => setSelectedRiskType('strategis')}
@@ -1307,12 +1385,6 @@ export default function App() {
               </div>
             </button>
           </div>
-
-          <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-center">
-            <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 text-xs font-bold uppercase transition-colors">
-              Keluar Sesi
-            </button>
-          </div>
         </motion.div>
       </div>
     );
@@ -1334,16 +1406,19 @@ export default function App() {
               className="font-bold text-xl tracking-tight text-white flex items-center gap-2"
             >
               <img 
-                src="https://sippa.papuatengahprov.go.id/layout/dist/img/logo.png" 
-                alt="Logo" 
-                className="w-8 h-8 object-contain brightness-125 shadow-sm"
+                src="https://upload.wikimedia.org/wikipedia/id/8/87/Lambang_Papua_Tengah.png" 
+                alt="Logo ISMAN" 
+                className="w-10 h-10 object-contain brightness-125"
                 referrerPolicy="no-referrer"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement;
-                  target.src = "https://upload.wikimedia.org/wikipedia/id/8/87/Lambang_Papua_Tengah.png";
+                  target.src = "/logo.png";
                 }}
               />
-              <span className="bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">MANRISK</span>
+              <div className="flex flex-col">
+                <span className="bg-gradient-to-r from-white to-amber-400 bg-clip-text text-transparent font-black tracking-tighter leading-none">ISMAN</span>
+                <span className="text-[6px] text-slate-500 font-bold tracking-widest leading-none mt-0.5">INTEGRATED RISK MANAGEMENT</span>
+              </div>
             </motion.div>
           )}
           <button 
@@ -1544,7 +1619,7 @@ export default function App() {
               </div>
               <h3 className="text-xl font-bold text-slate-900 mb-2">Konfirmasi Keluar</h3>
               <p className="text-slate-500 text-sm mb-8 font-medium italic leading-relaxed">
-                "Apakah anda yakin ingin keluar dari sistem manajemen risiko ini?"
+                "Apakah anda yakin ingin keluar dari sistem ISMAN ini?"
               </p>
               <div className="flex gap-3">
                 <button 
@@ -1644,6 +1719,8 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
   const [risksState, setRisksState] = useState<any[]>([]);
   const [contextsState, setContextsState] = useState<any[]>([]);
   const [finalDocsState, setFinalDocsState] = useState<any[]>([]);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | 'name'>('name');
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -1941,13 +2018,75 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
     setStats(allStats);
   }, [accounts, risksState, contextsState, finalDocsState, filterRiskType, user.role]);
 
+  const sortedAccounts = useMemo(() => {
+    if (sortOrder === 'name') {
+      return [...accounts].sort((a, b) => (a.username || '').localeCompare(b.username || ''));
+    }
+    return [...accounts].sort((a, b) => {
+      const percentA = stats[a.uid]?.percent || 0;
+      const percentB = stats[b.uid]?.percent || 0;
+      return sortOrder === 'desc' ? percentB - percentA : percentA - percentB;
+    });
+  }, [accounts, stats, sortOrder]);
+
+  const handleDownloadReport = async () => {
+    setIsExporting(true);
+    try {
+      const { jsPDF } = await import('jspdf');
+      const autoTable = (await import('jspdf-autotable')).default;
+      
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const timestamp = new Date().toLocaleString('id-ID');
+      
+      doc.setFontSize(16);
+      doc.text('LAPORAN MONITORING PROGRESS PENGISIAN', 105, 15, { align: 'center' });
+      doc.setFontSize(10);
+      doc.text(`Kategori: ${filterRiskType.toUpperCase()} | Waktu: ${timestamp}`, 105, 22, { align: 'center' });
+
+      const tableData = sortedAccounts
+        .filter(acc => {
+          const role = (acc.role || '').toLowerCase();
+          // Exclude admin and operator, only show user
+          return role === 'user';
+        })
+        .map((acc, idx) => {
+          const s = stats[acc.uid] || { percent: 0 };
+          return [
+            idx + 1,
+            acc.username || '-',
+            `${s.percent || 0}%`
+          ];
+        });
+
+      autoTable(doc, {
+        startY: 30,
+        head: [['No', 'Nama OPD', 'Progress %']],
+        body: tableData,
+        theme: 'grid',
+        headStyles: { fillColor: [51, 65, 85], textColor: 255, fontStyle: 'bold', halign: 'center' },
+        columnStyles: {
+          0: { cellWidth: 15, halign: 'center' },
+          1: { cellWidth: 'auto' },
+          2: { cellWidth: 35, halign: 'center' }
+        },
+        styles: { fontSize: 9 }
+      });
+
+      doc.save(`Progress_Monitoring_${filterRiskType}_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (err) {
+      console.error('Export error:', err);
+      alert('Gagal mengunduh laporan');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   if (loading) return <div className="flex justify-center p-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-600"></div></div>;
 
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex flex-wrap gap-4 justify-between items-center">
           <div className="flex items-center gap-4">
             <h4 className="font-bold text-slate-700 uppercase italic text-sm">Monitoring Progress Pengisian</h4>
             <div className="flex bg-slate-200 p-0.5 rounded-lg text-[9px] font-black">
@@ -1965,11 +2104,34 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
               </button>
             </div>
           </div>
-          <span className="text-[10px] bg-blue-100 text-blue-600 px-2 py-1 rounded font-black uppercase tracking-tight">Real-time sync: {filterRiskType}</span>
+          
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 bg-white border border-slate-200 px-3 py-1 rounded-lg">
+              <span className="text-[10px] font-bold text-slate-400">SORT:</span>
+              <select 
+                className="text-[10px] font-bold text-slate-600 bg-transparent outline-none cursor-pointer"
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as any)}
+              >
+                <option value="name">Nama (A-Z)</option>
+                <option value="desc">Progress (Tinggi-Rendah)</option>
+                <option value="asc">Progress (Rendah-Tinggi)</option>
+              </select>
+            </div>
+
+            <button 
+              onClick={handleDownloadReport}
+              disabled={isExporting}
+              className="flex items-center gap-2 px-4 py-1.5 bg-slate-900 shadow-lg shadow-slate-200 text-white rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-slate-800 disabled:opacity-50"
+            >
+              <Download size={14} />
+              {isExporting ? 'Exporting...' : 'Unduh Laporan'}
+            </button>
+          </div>
         </div>
         <div className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {accounts.map((acc) => {
+            {sortedAccounts.map((acc) => {
               const s = stats[acc.uid] || { total: 0, percent: 0, checks: {}, reasons: {} };
               return (
                 <div 
@@ -1987,11 +2149,12 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
                   )}
 
                   <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3">
                       <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-colors capitalize font-black text-xl">
                         {acc.username?.charAt(0)}
                       </div>
                       <div>
+                        <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Nama OPD</div>
                         <h5 className="font-bold text-slate-800 text-base">{acc.username}</h5>
                         <span className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-tighter ${
                           acc.role === 'Administrator' ? 'bg-red-100 text-red-600' :
@@ -2209,13 +2372,13 @@ function LoginPage({ onLogin, accounts }: { onLogin: (userData: any) => void, ac
         className="mb-8 relative"
       >
         <img 
-          src="https://sippa.papuatengahprov.go.id/layout/dist/img/logo.png" 
-          alt="Logo Papua Tengah" 
-          className="w-32 h-auto drop-shadow-2xl object-contain transition-transform hover:scale-105 duration-500 brightness-110"
+          src="https://upload.wikimedia.org/wikipedia/id/8/87/Lambang_Papua_Tengah.png" 
+          alt="Logo ISMAN" 
+          className="w-48 h-auto drop-shadow-2xl object-contain transition-transform hover:scale-105 duration-500 brightness-110"
           referrerPolicy="no-referrer"
           onError={(e) => {
             const target = e.target as HTMLImageElement;
-            target.src = "https://upload.wikimedia.org/wikipedia/id/8/87/Lambang_Papua_Tengah.png";
+            target.src = "/logo.png";
           }}
         />
       </motion.div>
@@ -2226,8 +2389,9 @@ function LoginPage({ onLogin, accounts }: { onLogin: (userData: any) => void, ac
         className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden"
       >
         <div className="p-8 bg-slate-50 border-b border-slate-100 text-center">
-          <h1 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Sistem Manajemen Risiko</h1>
-          <p className="text-slate-500 text-sm mt-1 font-bold">Pemerintah Provinsi Papua Tengah</p>
+          <h1 className="text-3xl font-black text-blue-600 tracking-tighter uppercase italic">ISMAN</h1>
+          <p className="text-slate-600 text-[10px] font-black uppercase tracking-tight -mt-1">Integrated Risk Management System</p>
+          <p className="text-slate-400 text-[10px] mt-2 font-bold uppercase tracking-widest">Pemerintah Provinsi Papua Tengah</p>
         </div>
         
         <form onSubmit={handleManualLogin} className="p-8 space-y-6">
@@ -2364,24 +2528,22 @@ function AccountManagementView({ accounts }: { accounts: any[] }) {
 
   const [error, setError] = useState('');
 
+  const [confirmDeleteData, setConfirmDeleteData] = useState<{uid: string, username: string} | null>(null);
+
   const handleDelete = async (uid: string, username: string) => {
     if (username === 'admin') {
       alert('Akun admin utama tidak dapat dihapus!');
       return;
     }
+    setConfirmDeleteData({ uid, username });
+  };
 
-    if (confirmDelete !== uid) {
-      setConfirmDelete(uid);
-      // Automatically cancel after 4 seconds
-      setTimeout(() => {
-        setConfirmDelete(prev => prev === uid ? null : prev);
-      }, 4000);
-      return;
-    }
-
+  const commitDeleteAccount = async () => {
+    if (!confirmDeleteData) return;
+    const { uid } = confirmDeleteData;
     try {
       await deleteDoc(doc(db, 'accounts', uid));
-      setConfirmDelete(null);
+      setConfirmDeleteData(null);
       alert('Akun berhasil dihapus permanen.');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `accounts/${uid}`);
@@ -2545,17 +2707,11 @@ function AccountManagementView({ accounts }: { accounts: any[] }) {
                             className={`transition-all flex items-center justify-center gap-1 font-black uppercase text-[9px] px-3 py-1.5 rounded-full shadow-sm ${
                               acc.username === 'admin' 
                                 ? 'opacity-20 cursor-not-allowed text-slate-400 bg-slate-100' 
-                                : confirmDelete === acc.uid
-                                  ? 'bg-red-600 text-white animate-pulse ring-4 ring-red-100'
-                                  : 'text-red-500 bg-red-50 hover:bg-red-100 border border-red-100'
+                                : 'text-red-500 bg-red-50 hover:bg-red-100 border border-red-100'
                             }`}
                             disabled={acc.username === 'admin'}
                           >
-                            {confirmDelete === acc.uid ? (
-                              <><Check size={12} /> Konfirmasi Hapus</>
-                            ) : (
-                              <><Trash2 size={12} /> Hapus Akun</>
-                            )}
+                            <Trash2 size={12} /> Hapus Akun
                           </button>
                         </>
                       )}
@@ -2567,6 +2723,41 @@ function AccountManagementView({ accounts }: { accounts: any[] }) {
           </table>
         </div>
       </div>
+
+      <AnimatePresence>
+        {confirmDeleteData && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center border border-slate-100"
+            >
+              <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={32} className="text-red-500" />
+              </div>
+              <h4 className="text-xl font-bold text-slate-900 mb-2 uppercase italic tracking-tight font-black">Hapus Akun?</h4>
+              <p className="text-slate-500 text-[11px] mb-8 font-medium italic leading-relaxed">
+                Apakah anda yakin ingin menghapus akun <strong>{confirmDeleteData.username}</strong>? Data pengisian user ini akan tetap ada di database tapi akses masuk akan dicabut.
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setConfirmDeleteData(null)}
+                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-colors"
+                >
+                  Batal
+                </button>
+                <button 
+                  onClick={commitDeleteAccount}
+                  className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-colors shadow-lg shadow-red-100"
+                >
+                  Ya, Hapus
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -2947,13 +3138,13 @@ const getRiskLevel = (d: number, k: number) => {
     return { label: 'Sangat Tinggi', color: 'bg-red-600 text-white', level: 4 };
   }
   if (K === 2) {
-    if (D <= 2) return { label: 'Rendah', color: 'bg-green-500 text-white', level: 1 };
+    if (D <= 2) return { label: 'Rendah', color: 'bg-green-500 text-white', level: 1 }; // (1,2) and (2,2) are now Green (Rendah)
     if (D === 3) return { label: 'Sedang', color: 'bg-yellow-400 text-slate-900', level: 2 };
     return { label: 'Tinggi', color: 'bg-amber-500 text-white', level: 3 };
   }
   if (K === 1) {
-    if (D <= 1) return { label: 'Rendah', color: 'bg-green-500 text-white', level: 1 };
-    if (D === 2 || D === 3 || D === 4) return { label: 'Sedang', color: 'bg-yellow-400 text-slate-900', level: 2 };
+    if (D <= 2) return { label: 'Rendah', color: 'bg-green-500 text-white', level: 1 };
+    if (D === 3 || D === 4) return { label: 'Sedang', color: 'bg-yellow-400 text-slate-900', level: 2 };
     return { label: 'Tinggi', color: 'bg-amber-500 text-white', level: 3 };
   }
   return { label: 'N/A', color: 'bg-slate-100', level: 0 };
@@ -3133,24 +3324,24 @@ function RiskResidualView({ user, isReadOnly, riskType }: { user: any, isReadOnl
                           <option value="Manual">Input Manual</option>
                           <option value="Tidak Ada">Tidak Ada</option>
                         </select>
-                        <textarea 
+                        <EditableTextarea 
                           className="w-full bg-slate-50 border border-slate-100 rounded p-1 outline-none resize-none text-[9px] focus:border-blue-300 disabled:opacity-50" 
                           rows={3}
                           placeholder="..."
                           value={row.rtpControl || ''}
                           disabled={isReadOnly || row.rtpControl === 'Tidak Ada'}
-                          onChange={(e) => updateResidualField(row.id, 'rtpControl', e.target.value)}
+                          onChange={(val) => updateResidualField(row.id, 'rtpControl', val)}
                         />
                       </div>
                     </td>
                     <td className="px-3 py-4">
-                      <textarea 
+                      <EditableTextarea 
                         className={`w-full border rounded p-1 outline-none resize-none text-[9px] focus:border-red-300 transition-all ${row.rtpControl === 'Tidak Ada' ? 'bg-black text-white cursor-not-allowed border-black' : 'bg-slate-50 border-slate-100 text-red-600'}`} 
                         rows={3}
                         placeholder="..."
                         value={row.rtpControl === 'Tidak Ada' ? 'N/A (Tidak Ada Pengendalian)' : (row.rtpGap || '')}
                         disabled={isReadOnly || row.rtpControl === 'Tidak Ada'}
-                        onChange={(e) => updateResidualField(row.id, 'rtpGap', e.target.value)}
+                        onChange={(val) => updateResidualField(row.id, 'rtpGap', val)}
                       />
                     </td>
                     <td className="px-2 py-4 text-center border-l border-slate-100 bg-slate-50/30">
@@ -3228,9 +3419,8 @@ function RiskTreatmentView({ user, isReadOnly, riskType }: { user: any, isReadOn
         };
       });
 
-      // FILTER: Only risks assessed in Menu 5? Or significant risks?
-      // The user wants risks from Menu 5. I'll include all that have a residual score.
-      const filtered = data.filter(r => r.resScore > 0);
+      // FILTER: Only risks assessed in Menu 4 with "Tinggi" or "Sangat Tinggi" level
+      const filtered = data.filter(r => r.resScore > 0 && r.resRiskLevel >= 3);
 
       // SORT: Primarily by new residual level, then by score descending
       filtered.sort((a, b) => {
@@ -3274,8 +3464,8 @@ function RiskTreatmentView({ user, isReadOnly, riskType }: { user: any, isReadOn
               <tr>
                 <th className="px-2 py-4 border-r border-slate-800">No</th>
                 <th className="px-3 py-4 border-r border-slate-800">Risiko (Residual)</th>
-                <th className="px-3 py-4 border-r border-slate-800">Pengendalian Sisa</th>
-                <th className="px-3 py-4 border-r border-slate-800">Celah Sisa</th>
+                <th className="px-3 py-4 border-r border-slate-800">Pengendalian yang sudah ada</th>
+                <th className="px-3 py-4 border-r border-slate-800">Sisa Celah</th>
                 <th className="px-3 py-4 border-r border-slate-800">Rencana Tindak (RTP) Baru</th>
                 <th className="px-3 py-4 border-r border-slate-800">PJ</th>
                 <th className="px-3 py-4">Deadline</th>
@@ -3299,22 +3489,22 @@ function RiskTreatmentView({ user, isReadOnly, riskType }: { user: any, isReadOn
                     <p className="text-[9px] italic text-red-400 bg-red-50/30 p-2 rounded border border-red-50">{row.rtpGap || '-'}</p>
                   </td>
                   <td className="px-3 py-4">
-                    <textarea 
+                    <EditableTextarea 
                       className="w-full bg-white border border-slate-200 rounded p-1 outline-none resize-none text-[9px] focus:border-blue-500" 
                       rows={3}
                       placeholder="..."
                       value={row.rtpAction || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateTreatmentField(row.id, 'rtpAction', e.target.value)}
+                      onChange={(val) => updateTreatmentField(row.id, 'rtpAction', val)}
                     />
                   </td>
                   <td className="px-3 py-4">
-                    <input 
+                    <EditableInput 
                       className="w-full bg-white border border-slate-200 rounded p-1 outline-none text-[9px] font-medium focus:border-blue-500"
                       placeholder="PJ..."
                       value={row.rtpPJ || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateTreatmentField(row.id, 'rtpPJ', e.target.value)}
+                      onChange={(val) => updateTreatmentField(row.id, 'rtpPJ', val)}
                     />
                   </td>
                   <td className="px-3 py-4">
@@ -3454,9 +3644,10 @@ function RiskMapView({ user, riskType }: { user: any, riskType: 'strategis' | 'o
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
               <h5 className="text-[10px] font-bold uppercase mb-2 text-slate-500">Keterangan Level</h5>
               <div className="space-y-2">
-                <div className="flex items-center gap-2"><div className="w-3 h-3 bg-red-500 rounded-sm" /> <span className="text-[9px] uppercase font-bold text-slate-600">Sangat Tinggi</span></div>
-                <div className="flex items-center gap-2"><div className="w-3 h-3 bg-amber-400 rounded-sm" /> <span className="text-[9px] uppercase font-bold text-slate-600">Tinggi / Sedang</span></div>
-                <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-100 rounded-sm border border-slate-200" /> <span className="text-[9px] uppercase font-bold text-slate-600">Rendah</span></div>
+                <div className="flex items-center gap-2"><div className="w-3 h-3 bg-red-600 rounded-sm" /> <span className="text-[9px] uppercase font-bold text-slate-600">Sangat Tinggi</span></div>
+                <div className="flex items-center gap-2"><div className="w-3 h-3 bg-amber-500 rounded-sm" /> <span className="text-[9px] uppercase font-bold text-slate-600">Tinggi</span></div>
+                <div className="flex items-center gap-2"><div className="w-3 h-3 bg-yellow-400 rounded-sm" /> <span className="text-[9px] uppercase font-bold text-slate-600">Sedang</span></div>
+                <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-500 rounded-sm border border-slate-200" /> <span className="text-[9px] uppercase font-bold text-slate-600">Rendah</span></div>
               </div>
             </div>
           </div>
@@ -3470,6 +3661,8 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [contextData, setContextData] = useState<any>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{id: string, type: 'row' | 'sub', rowId?: string, subRows?: any[], subIdx?: number} | null>(null);
 
   const contextId = `risk_context_${user.uid}_${riskType}`;
 
@@ -3520,11 +3713,21 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
         ? customOrder 
         : (rows.length > 0 ? Math.max(...rows.map(r => r.order || 0)) + 1 : 1);
       
+      const prefix = riskType === 'operasional' ? 'ROO' : 'RSO';
+      let initialCode = `${prefix}.26.00.00.00`;
+      
+      if (rows.length > 0 && rows[0].risikoKode) {
+        const fp = rows[0].risikoKode.split('.');
+        if (fp.length >= 4) {
+          initialCode = `${prefix}.26.${fp[2]}.${fp[3]}.00`;
+        }
+      }
+
       await setDoc(newDocRef, {
         tujuan: initTujuan || '',
         indikator: initIndikator || '',
         risikoUraian: '',
-        risikoKode: '',
+        risikoKode: initialCode,
         pemilik: '',
         // Initialize with one sub-row
         subRows: [
@@ -3557,21 +3760,43 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
     return () => window.removeEventListener('add-risk-row', handleAddRow);
   }, [addRow]);
 
-  const deleteRow = useCallback(async (id: string | undefined) => {
-    if (isReadOnly) return;
-    if (!id) {
-      console.error('Delete failed: No ID provided');
-      return;
-    }
-    
+  const commitDeleteRow = async () => {
+    if (!deleteTarget || isReadOnly) return;
+    const { id } = deleteTarget;
     try {
       await deleteDoc(doc(db, 'risk_identification', id));
+      setDeleteTarget(null);
     } catch (err: any) {
       console.error('Error deleting document:', err);
       alert('Gagal menghapus: ' + err.message);
       handleFirestoreError(err, OperationType.DELETE, `risk_identification/${id}`);
     }
-  }, [isReadOnly]);
+  };
+
+  const commitRemoveSubRow = async () => {
+    if (!deleteTarget || isReadOnly) return;
+    const { rowId, subRows, subIdx } = deleteTarget;
+    if (!rowId || !subRows || subIdx === undefined) return;
+
+    const newSubRows = subRows.filter((_, i) => i !== subIdx);
+    try {
+      await updateDoc(doc(db, 'risk_identification', rowId), {
+        subRows: newSubRows,
+        updatedAt: new Date().toISOString()
+      });
+      setDeleteTarget(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `risk_identification/${rowId}`);
+    }
+  };
+
+  const deleteRow = (id: string) => {
+    setDeleteTarget({ id, type: 'row' });
+  };
+
+  const removeSubRow = (rowId: string, subRows: any[], subIdx: number) => {
+    setDeleteTarget({ id: `${rowId}_${subIdx}`, type: 'sub', rowId, subRows, subIdx });
+  };
 
   // Handle sub-row operations
   const updateSubRowField = async (rowId: string, subRows: any[], subIdx: number, field: string, value: any) => {
@@ -3609,24 +3834,13 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
       handleFirestoreError(error, OperationType.UPDATE, `risk_identification/${rowId}`);
     }
   };
-
-  const removeSubRow = async (rowId: string, subRows: any[], subIdx: number) => {
-    if (isReadOnly || subRows.length <= 1) return;
-    const newSubRows = subRows.filter((_, i) => i !== subIdx);
-    try {
-      await updateDoc(doc(db, 'risk_identification', rowId), {
-        subRows: newSubRows,
-        updatedAt: new Date().toISOString()
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `risk_identification/${rowId}`);
-    }
-  };
-
-  // Manual sync function
   const runSync = async () => {
     if (!contextData || !contextData.assessmentRows) {
       alert('Data dari Menu 1 belum tersedia atau kosong.');
+      return;
+    }
+
+    if (!window.confirm("Apakah anda yakin ingin melakukan sinkronisasi? Baris risiko yang tidak ada di Menu 1 akan dihapus permanen.")) {
       return;
     }
     
@@ -3700,26 +3914,41 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
 
   // Helper to handle risk code segment updates
   const updateRiskCodeSegment = async (id: string, currentFullCode: string, segmentIndex: number, newValue: string) => {
-    // Take the last 2 digits typed to allow "sliding" entry (e.g. 00 -> type 1 -> 01 -> type 2 -> 12)
     const val = newValue.replace(/\D/g, '').slice(-2);
-    
-    // Default structure: RSO.26.00.00.00 or ROO.26.00.00.00
     const prefix = riskType === 'operasional' ? 'ROO' : 'RSO';
     const defaultCode = `${prefix}.26.00.00.00`;
     let parts = (currentFullCode || defaultCode).split('.');
     
-    // Ensure structure is correct
     if (parts.length < 5) {
       parts = [prefix, '26', '00', '00', '00'];
     }
 
-    // Segment 0: RSO, Segment 1: 26, Segment 2: XX, Segment 3: YY, Segment 4: ZZ
-    // User wants to edit parts 2, 3, and 4
     const partIndex = segmentIndex + 2; 
     parts[partIndex] = val.padStart(2, '0');
-    
     const newFullCode = parts.join('.');
-    await updateField(id, 'risikoKode', newFullCode);
+    
+    // Propagation logic: If first row changes segment 0 or 1, apply to all rows
+    if (rows.length > 0 && id === rows[0].id && segmentIndex < 2) {
+      try {
+        const batchUpdate = async () => {
+          for (const r of rows) {
+            let rParts = (r.risikoKode || defaultCode).split('.');
+            if (rParts.length < 5) rParts = [prefix, '26', '00', '00', '00'];
+            rParts[partIndex] = parts[partIndex];
+            const rNewCode = rParts.join('.');
+            await updateDoc(doc(db, 'risk_identification', r.id), { 
+              risikoKode: rNewCode,
+              updatedAt: new Date().toISOString()
+            });
+          }
+        };
+        await batchUpdate();
+      } catch (err) {
+        console.error("Propagation error:", err);
+      }
+    } else {
+      await updateField(id, 'risikoKode', newFullCode);
+    }
   };
 
   return (
@@ -3789,11 +4018,11 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
                             <td className="px-2 py-4 border-r border-slate-100 text-center font-bold" rowSpan={subRows.length}>{idx + 1}</td>
                             <td className="px-2 py-4 border-r border-slate-100" rowSpan={subRows.length}>
                               <div className="flex flex-col gap-2">
-                                <textarea 
+                                <EditableTextarea 
                                   className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
                                   rows={3} 
                                   value={row.tujuan} 
-                                  onChange={e => updateField(row.id, 'tujuan', e.target.value)}
+                                  onChange={val => updateField(row.id, 'tujuan', val)}
                                   disabled={isReadOnly}
                                 />
                                 {!isReadOnly && (
@@ -3808,20 +4037,20 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
                               </div>
                             </td>
                             <td className="px-2 py-4 border-r border-slate-100" rowSpan={subRows.length}>
-                              <textarea 
+                              <EditableTextarea 
                                 className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
                                 rows={3} 
                                 value={row.indikator} 
-                                onChange={e => updateField(row.id, 'indikator', e.target.value)}
+                                onChange={val => updateField(row.id, 'indikator', val)}
                                 disabled={isReadOnly}
                               />
                             </td>
                             <td className="px-2 py-4 border-r border-slate-100" rowSpan={subRows.length}>
-                              <textarea 
+                              <EditableTextarea 
                                 className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
                                 rows={3} 
                                 value={row.risikoUraian} 
-                                onChange={e => updateField(row.id, 'risikoUraian', e.target.value)}
+                                onChange={val => updateField(row.id, 'risikoUraian', val)}
                                 disabled={isReadOnly}
                               />
                             </td>
@@ -3837,26 +4066,26 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
                                 return (
                                   <div className="flex items-center justify-center gap-0.5 text-[9px]">
                                     <span className="text-slate-400 select-none font-bold">{prefix}.26.</span>
-                                    <input 
+                                    <EditableInput 
                                       type="text"
                                       value={p1}
-                                      onChange={(e) => updateRiskCodeSegment(row.id, row.risikoKode, 0, e.target.value)}
-                                      className="w-6 bg-white border border-slate-200 rounded text-center focus:border-blue-400 outline-none hover:border-slate-300 transition-colors py-0.5 disabled:opacity-50"
-                                      disabled={isReadOnly}
+                                      onChange={(val) => updateRiskCodeSegment(row.id, row.risikoKode, 0, val)}
+                                      className="w-6 bg-white border border-slate-200 rounded text-center focus:border-blue-400 outline-none hover:border-slate-300 transition-colors py-0.5 disabled:opacity-50 disabled:bg-slate-100/50"
+                                      disabled={isReadOnly || idx > 0}
                                     />
                                     <span className="text-slate-400 select-none">.</span>
-                                    <input 
+                                    <EditableInput 
                                       type="text"
                                       value={p2}
-                                      onChange={(e) => updateRiskCodeSegment(row.id, row.risikoKode, 1, e.target.value)}
-                                      className="w-6 bg-white border border-slate-200 rounded text-center focus:border-blue-400 outline-none hover:border-slate-300 transition-colors py-0.5 disabled:opacity-50"
-                                      disabled={isReadOnly}
+                                      onChange={(val) => updateRiskCodeSegment(row.id, row.risikoKode, 1, val)}
+                                      className="w-6 bg-white border border-slate-200 rounded text-center focus:border-blue-400 outline-none hover:border-slate-300 transition-colors py-0.5 disabled:opacity-50 disabled:bg-slate-100/50"
+                                      disabled={isReadOnly || idx > 0}
                                     />
                                     <span className="text-slate-400 select-none">.</span>
-                                    <input 
+                                    <EditableInput 
                                       type="text"
                                       value={p3}
-                                      onChange={(e) => updateRiskCodeSegment(row.id, row.risikoKode, 2, e.target.value)}
+                                      onChange={(val) => updateRiskCodeSegment(row.id, row.risikoKode, 2, val)}
                                       className="w-6 bg-white border border-slate-200 rounded text-center focus:border-blue-400 outline-none hover:border-slate-300 transition-colors py-0.5 disabled:opacity-50"
                                       disabled={isReadOnly}
                                     />
@@ -3865,22 +4094,22 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
                               })()}
                             </td>
                             <td className="px-2 py-4 border-r border-slate-100" rowSpan={subRows.length}>
-                              <textarea 
+                              <EditableTextarea 
                                 className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
                                 rows={3} 
                                 value={row.pemilik} 
-                                onChange={e => updateField(row.id, 'pemilik', e.target.value)}
+                                onChange={val => updateField(row.id, 'pemilik', val)}
                                 disabled={isReadOnly}
                               />
                             </td>
                           </>
                         )}
                         <td className="px-2 py-4 border-r border-slate-100 italic relative group/sub">
-                          <textarea 
+                          <EditableTextarea 
                             className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
                             rows={3} 
                             value={sub.sebabUraian} 
-                            onChange={e => updateSubRowField(row.id, subRows, sIdx, 'sebabUraian', e.target.value)}
+                            onChange={val => updateSubRowField(row.id, subRows, sIdx, 'sebabUraian', val)}
                             disabled={isReadOnly}
                           />
                           {!isReadOnly && sIdx === subRows.length - 1 && (
@@ -3901,36 +4130,36 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
                           )}
                         </td>
                         <td className="px-2 py-4 border-r border-slate-100 text-center">
-                          <input 
+                          <EditableInput 
                             className="w-full bg-transparent p-0 outline-none text-center disabled:text-slate-500" 
                             value={sub.sebabSumber} 
-                            onChange={e => updateSubRowField(row.id, subRows, sIdx, 'sebabSumber', e.target.value)}
+                            onChange={val => updateSubRowField(row.id, subRows, sIdx, 'sebabSumber', val)}
                             disabled={isReadOnly}
                           />
                         </td>
                         <td className="px-2 py-4 border-r border-slate-100 text-center font-black">
-                          <input 
+                          <EditableInput 
                             className="w-full bg-transparent p-0 outline-none text-center disabled:text-slate-500" 
                             value={sub.control} 
-                            onChange={e => updateSubRowField(row.id, subRows, sIdx, 'control', e.target.value)}
+                            onChange={val => updateSubRowField(row.id, subRows, sIdx, 'control', val)}
                             disabled={isReadOnly}
                           />
                         </td>
                         <td className="px-2 py-4 border-r border-slate-100 text-red-600">
-                          <textarea 
+                          <EditableTextarea 
                             className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500 font-italic" 
                             rows={3} 
                             value={sub.dampakUraian} 
-                            onChange={e => updateSubRowField(row.id, subRows, sIdx, 'dampakUraian', e.target.value)}
+                            onChange={val => updateSubRowField(row.id, subRows, sIdx, 'dampakUraian', val)}
                             disabled={isReadOnly}
                           />
                         </td>
                         <td className="px-2 py-4">
-                          <textarea 
+                          <EditableTextarea 
                             className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
                             rows={3} 
                             value={sub.dampakPihak} 
-                            onChange={e => updateSubRowField(row.id, subRows, sIdx, 'dampakPihak', e.target.value)}
+                            onChange={val => updateSubRowField(row.id, subRows, sIdx, 'dampakPihak', val)}
                             disabled={isReadOnly}
                           />
                         </td>
@@ -3964,6 +4193,43 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
            </p>
         </div>
       </div>
+
+      <AnimatePresence>
+        {deleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center"
+            >
+              <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={32} className="text-red-500" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2 font-black uppercase italic tracking-tight">Konfirmasi Hapus</h3>
+              <p className="text-slate-500 text-[11px] mb-8 font-medium italic leading-relaxed">
+                {deleteTarget.type === 'row' 
+                  ? "Apakah anda yakin ingin menghapus baris risiko ini? Data yang terkait di menu lain juga akan terdampak."
+                  : "Apakah anda yakin ingin menghapus baris sebab/dampak ini?"}
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setDeleteTarget(null)}
+                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold tracking-widest uppercase text-[10px] hover:bg-slate-200 transition-colors"
+                >
+                  Batal
+                </button>
+                <button 
+                  onClick={deleteTarget.type === 'row' ? commitDeleteRow : commitRemoveSubRow}
+                  className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-black tracking-widest uppercase text-[10px] hover:bg-red-700 transition-colors shadow-lg shadow-red-100"
+                >
+                  Ya, Hapus
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -4071,49 +4337,49 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
           <div className="font-bold">Nama Pemda</div>
           <div className="col-span-2 flex gap-2">
             <span>:</span> 
-            <input name="namaPemda" value={formData.namaPemda} onChange={handleChange} disabled={isReadOnly} className="border-b border-dotted border-slate-400 flex-1 outline-none font-bold disabled:border-transparent" />
+            <EditableInput value={formData.namaPemda} onChange={val => updateData({ namaPemda: val })} disabled={isReadOnly} className="border-b border-dotted border-slate-400 flex-1 outline-none font-bold disabled:border-transparent" />
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2">
           <div className="font-bold">Tahun Penilaian</div>
           <div className="col-span-2 flex gap-2">
             <span>:</span> 
-            <input name="tahunPenilaian" value={formData.tahunPenilaian} onChange={handleChange} disabled={isReadOnly} className="border-b border-dotted border-slate-400 flex-1 outline-none font-bold disabled:border-transparent" />
+            <EditableInput value={formData.tahunPenilaian} onChange={val => updateData({ tahunPenilaian: val })} disabled={isReadOnly} className="border-b border-dotted border-slate-400 flex-1 outline-none font-bold disabled:border-transparent" />
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2">
           <div className="font-bold">Periode yang dinilai</div>
           <div className="col-span-2 flex gap-2">
             <span>:</span> 
-            <input name="periodeRenstra" value={formData.periodeRenstra} onChange={handleChange} disabled={isReadOnly} className="border-b border-dotted border-slate-400 flex-1 outline-none disabled:border-transparent" />
+            <EditableInput value={formData.periodeRenstra} onChange={val => updateData({ periodeRenstra: val })} disabled={isReadOnly} className="border-b border-dotted border-slate-400 flex-1 outline-none disabled:border-transparent" />
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2">
           <div className="font-bold">Urusan Pemerintahan</div>
           <div className="col-span-2 flex gap-2">
             <span>:</span> 
-            <input name="urusanPemerintahan" value={formData.urusanPemerintahan} onChange={handleChange} disabled={isReadOnly} className="border-b border-dotted border-slate-400 flex-1 outline-none disabled:border-transparent" />
+            <EditableInput value={formData.urusanPemerintahan} onChange={val => updateData({ urusanPemerintahan: val })} disabled={isReadOnly} className="border-b border-dotted border-slate-400 flex-1 outline-none disabled:border-transparent" />
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2">
           <div className="font-bold">OPD yang Dinilai</div>
           <div className="col-span-2 flex gap-2">
             <span>:</span> 
-            <input name="opdDinilai" value={formData.opdDinilai} onChange={handleChange} disabled={isReadOnly} className="border-b border-dotted border-slate-400 flex-1 outline-none disabled:border-transparent" />
+            <EditableInput value={formData.opdDinilai} onChange={val => updateData({ opdDinilai: val })} disabled={isReadOnly} className="border-b border-dotted border-slate-400 flex-1 outline-none disabled:border-transparent" />
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2">
           <div className="font-bold">Sumber Data</div>
           <div className="col-span-2 flex gap-2">
             <span>:</span> 
-            <input name="sumberData" value={formData.sumberData} onChange={handleChange} disabled={isReadOnly} className="border-b border-dotted border-slate-900 flex-1 outline-none font-bold disabled:border-transparent" />
+            <EditableInput value={formData.sumberData} onChange={val => updateData({ sumberData: val })} disabled={isReadOnly} className="border-b border-dotted border-slate-900 flex-1 outline-none font-bold disabled:border-transparent" />
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2 pt-4">
           <div className="font-bold">{riskType === 'operasional' ? 'Tujuan Operasional' : 'Tujuan Strategis'}</div>
           <div className="col-span-2 flex gap-2">
             <span>:</span> 
-            <textarea name="tujuanStrategis" value={formData.tujuanStrategis} onChange={handleChange} disabled={isReadOnly} className="border border-slate-200 p-2 rounded flex-1 outline-none text-[11px] leading-relaxed disabled:border-slate-100 disabled:text-slate-500" rows={3} />
+            <EditableTextarea value={formData.tujuanStrategis} onChange={val => updateData({ tujuanStrategis: val })} disabled={isReadOnly} className="border border-slate-200 p-2 rounded flex-1 outline-none text-[11px] leading-relaxed disabled:border-slate-100 disabled:text-slate-500" rows={3} />
           </div>
         </div>
       </div>
@@ -4142,8 +4408,10 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
                     {!isReadOnly && (
                       <button 
                         onClick={() => {
-                          const next = formData.sasaran.filter((_: any, i: number) => i !== idx);
-                          updateData({ sasaran: next });
+                          if (window.confirm("Hapus sasaran ini?")) {
+                            const next = formData.sasaran.filter((_: any, i: number) => i !== idx);
+                            updateData({ sasaran: next });
+                          }
                         }}
                         className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all p-1"
                       >
@@ -4202,8 +4470,10 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
                     {!isReadOnly && (
                       <button 
                         onClick={() => {
-                          const next = formData.ikuSasaran.filter((_: any, i: number) => i !== idx);
-                          updateData({ ikuSasaran: next });
+                          if (window.confirm("Hapus IKU ini?")) {
+                            const next = formData.ikuSasaran.filter((_: any, i: number) => i !== idx);
+                            updateData({ ikuSasaran: next });
+                          }
                         }}
                         className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all p-1"
                       >
@@ -4248,8 +4518,10 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
                     {!isReadOnly && (
                       <button 
                         onClick={() => {
-                          const next = formData.program.filter((_: any, i: number) => i !== idx);
-                          updateData({ program: next });
+                          if (window.confirm("Hapus program ini?")) {
+                            const next = formData.program.filter((_: any, i: number) => i !== idx);
+                            updateData({ program: next });
+                          }
                         }}
                         className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all p-1"
                       >
@@ -4308,8 +4580,10 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
                     {!isReadOnly && (
                       <button 
                         onClick={() => {
-                          const next = (formData.ikuProgram || []).filter((_: any, i: number) => i !== idx);
-                          updateData({ ikuProgram: next });
+                          if (window.confirm("Hapus IKU Program ini?")) {
+                            const next = (formData.ikuProgram || []).filter((_: any, i: number) => i !== idx);
+                            updateData({ ikuProgram: next });
+                          }
                         }}
                         className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all p-1"
                       >
@@ -4632,60 +4906,60 @@ function MonitoringCommunicationView({ user, isReadOnly, riskType }: { user: any
                     <p className="font-medium text-slate-700 leading-relaxed italic">{row.rtpAction || '(RTP belum diisi di Menu 5)'}</p>
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200">
-                    <textarea 
-                      className="w-full bg-transparent outline-none resize-none disabled:text-slate-500" 
+                    <EditableTextarea 
+                      className="w-full bg-transparent outline-none resize-none disabled:text-slate-500 text-[9px]" 
                       rows={2}
-                      placeholder="Input media..."
+                      placeholder="..."
                       value={row.commMedia || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateCommField(row.id, 'commMedia', e.target.value)}
+                      onChange={(val) => updateCommField(row.id, 'commMedia', val)}
                     />
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200">
-                    <input 
-                      className="w-full bg-transparent outline-none disabled:text-slate-500"
-                      placeholder="Input penyedia..."
+                    <EditableInput 
+                      className="w-full bg-transparent outline-none disabled:text-slate-500 text-[9px]"
+                      placeholder="..."
                       value={row.commProvider || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateCommField(row.id, 'commProvider', e.target.value)}
+                      onChange={(val) => updateCommField(row.id, 'commProvider', val)}
                     />
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200">
-                    <input 
-                      className="w-full bg-transparent outline-none disabled:text-slate-500"
-                      placeholder="Input penerima..."
+                    <EditableInput 
+                      className="w-full bg-transparent outline-none disabled:text-slate-500 text-[9px]"
+                      placeholder="..."
                       value={row.commReceiver || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateCommField(row.id, 'commReceiver', e.target.value)}
+                      onChange={(val) => updateCommField(row.id, 'commReceiver', val)}
                     />
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200">
                     <input 
                       type="date"
-                      className="w-full bg-transparent outline-none font-bold text-slate-600 cursor-pointer disabled:opacity-50"
+                      className="w-full bg-transparent outline-none font-bold text-slate-600 cursor-pointer disabled:opacity-50 text-[9px]"
                       value={row.commPlanTime || ''}
                       disabled={isReadOnly}
                       onChange={(e) => updateCommField(row.id, 'commPlanTime', e.target.value)}
                     />
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200">
-                    <textarea 
-                      className="w-full bg-transparent outline-none resize-none disabled:text-slate-500" 
+                    <EditableTextarea 
+                      className="w-full bg-transparent outline-none resize-none disabled:text-slate-500 text-[9px]" 
                       rows={2}
-                      placeholder="Input realisasi..."
+                      placeholder="..."
                       value={row.commRealTime || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateCommField(row.id, 'commRealTime', e.target.value)}
+                      onChange={(val) => updateCommField(row.id, 'commRealTime', val)}
                     />
                   </td>
                   <td className="px-3 py-4">
-                    <textarea 
-                      className="w-full bg-transparent outline-none resize-none disabled:text-slate-500" 
+                    <EditableTextarea 
+                      className="w-full bg-transparent outline-none resize-none disabled:text-slate-500 text-[9px]" 
                       rows={2}
-                      placeholder="Input keterangan..."
+                      placeholder="..."
                       value={row.commNotes || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateCommField(row.id, 'commNotes', e.target.value)}
+                      onChange={(val) => updateCommField(row.id, 'commNotes', val)}
                     />
                   </td>
                 </tr>
@@ -4799,12 +5073,12 @@ function MonitoringPlanPIView({ user, isReadOnly, riskType }: { user: any, isRea
                     />
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200">
-                    <input 
+                    <EditableInput 
                       className="w-full bg-transparent outline-none disabled:text-slate-500"
                       placeholder="Input PJ..."
                       value={row.monPJ || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateMonField(row.id, 'monPJ', e.target.value)}
+                      onChange={(val) => updateMonField(row.id, 'monPJ', val)}
                     />
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200">
@@ -4826,13 +5100,13 @@ function MonitoringPlanPIView({ user, isReadOnly, riskType }: { user: any, isRea
                     />
                   </td>
                   <td className="px-3 py-4">
-                    <textarea 
+                    <EditableTextarea 
                       className="w-full bg-transparent outline-none resize-none disabled:text-slate-500" 
                       rows={2}
                       placeholder="Input keterangan..."
                       value={row.monNotes || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateMonField(row.id, 'monNotes', e.target.value)}
+                      onChange={(val) => updateMonField(row.id, 'monNotes', val)}
                     />
                   </td>
                 </tr>
@@ -4955,35 +5229,35 @@ function RiskOccurrenceMonitoringView({ user, isReadOnly, riskType }: { user: an
                   </td>
                   {/* Kejadian Risiko - Sebab */}
                   <td className="px-2 py-4 border-r border-slate-200">
-                    <textarea 
+                    <EditableTextarea 
                       className="w-full bg-transparent outline-none resize-none disabled:text-slate-500"
                       rows={2}
                       placeholder="..."
                       value={row.eventCause || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateField(row.id, 'eventCause', e.target.value)}
+                      onChange={(val) => updateField(row.id, 'eventCause', val)}
                     />
                   </td>
                   {/* Kejadian Risiko - Dampak */}
                   <td className="px-2 py-4 border-r border-slate-200">
-                    <textarea 
+                    <EditableTextarea 
                       className="w-full bg-transparent outline-none resize-none disabled:text-slate-500"
                       rows={2}
                       placeholder="..."
                       value={row.eventImpact || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateField(row.id, 'eventImpact', e.target.value)}
+                      onChange={(val) => updateField(row.id, 'eventImpact', val)}
                     />
                   </td>
                   {/* Keterangan (Kejadian) */}
                   <td className="px-2 py-4 border-r border-slate-200">
-                    <textarea 
+                    <EditableTextarea 
                       className="w-full bg-transparent outline-none resize-none disabled:text-slate-500"
                       rows={2}
                       placeholder="..."
                       value={row.eventNotes || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateField(row.id, 'eventNotes', e.target.value)}
+                      onChange={(val) => updateField(row.id, 'eventNotes', val)}
                     />
                   </td>
                   {/* RTP */}
@@ -5140,7 +5414,15 @@ function FinalDocumentView({ user, isAdmin, isOperator }: { user: any, isAdmin: 
     }
   };
 
+  const [hasConfirmedUpload, setHasConfirmedUpload] = useState(false);
+  const [showDeclaration, setShowDeclaration] = useState(false);
+
   const handleConfirmUpload = async () => {
+    if (!hasConfirmedUpload) {
+      alert("Silakan centang pernyataan bahwa Anda telah mengunggah dokumen.");
+      return;
+    }
+    
     setSaving(true);
     const targetUid = user.uid;
     try {
@@ -5152,6 +5434,7 @@ function FinalDocumentView({ user, isAdmin, isOperator }: { user: any, isAdmin: 
         submissionType: 'Google Drive Confirmation',
         note: null // Clear previous notes on re-submission
       }, { merge: true });
+      setShowDeclaration(false);
       alert('Berhasil mengonfirmasi. Admin akan segera memverifikasi dokumen Anda di folder Drive.');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `final_documents/${targetUid}`);
@@ -5507,26 +5790,82 @@ function FinalDocumentView({ user, isAdmin, isOperator }: { user: any, isAdmin: 
                           </div>
                           <div>
                             <p className="text-xs font-bold text-slate-700 uppercase tracking-tight">{isSubmitted ? 'Telah Dikonfirmasi' : 'Konfirmasi Selesai'}</p>
-                            <p className="text-[9px] text-slate-400 italic mt-1 leading-tight">
+                            <p className="text-[9px] text-slate-400 italic mt-1 leading-tight mb-4">
                               {status === 'verified' ? 'Dokumen sudah divalidasi oleh admin.' : 
                                status === 'pending' ? 'Menunggu admin memverifikasi folder Anda.' : 
                                'Admin akan mulai memverifikasi setelah Anda mengonfirmasi'}
                             </p>
                           </div>
-                          <button 
-                            onClick={handleConfirmUpload}
-                            disabled={saving || isSubmitted}
-                            className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-[10px] transition-all uppercase tracking-widest shadow-lg disabled:cursor-not-allowed ${
-                              isSubmitted ? 'bg-slate-200 text-slate-400 shadow-none' : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-100'
-                            }`}
-                          >
-                            {saving ? 'MEMPROSES...' : isSubmitted ? 'SUDAH DIKONFIRMASI' : 'KONFIRMASI SEKARANG'}
-                          </button>
+
+                          {!isSubmitted && (
+                            <button 
+                              onClick={() => setShowDeclaration(true)}
+                              disabled={saving || isSubmitted}
+                              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-[10px] transition-all uppercase tracking-widest shadow-lg disabled:cursor-not-allowed ${
+                                isSubmitted ? 'bg-slate-200 text-slate-400 shadow-none' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-100'
+                              }`}
+                            >
+                              KONFIRMASI SEKARANG
+                            </button>
+                          )}
+
+                          {isSubmitted && (
+                            <button 
+                              disabled
+                              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-[10px] transition-all uppercase tracking-widest bg-slate-200 text-slate-400"
+                            >
+                              SUDAH DIKONFIRMASI
+                            </button>
+                          )}
                         </div>
                       );
                     })()}
                   </div>
                 </div>
+
+                <AnimatePresence>
+                  {showDeclaration && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                      <motion.div 
+                        initial={{ scale: 0.95, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.95, opacity: 0 }}
+                        className="bg-white rounded-3xl shadow-2xl p-8 max-w-sm w-full text-center border border-slate-100"
+                      >
+                        <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                          <CheckCircle size={32} className="text-blue-500" />
+                        </div>
+                        <h3 className="text-xl font-bold text-slate-900 mb-2 uppercase italic tracking-tight">Konfirmasi Final</h3>
+                        <p className="text-slate-500 text-[11px] mb-6 font-medium italic leading-relaxed">
+                          "Apakah Anda yakin data yang diupload sudah benar? Data tidak dapat diubah setelah konfirmasi."
+                        </p>
+
+                        <div className="flex items-start gap-3 text-left bg-emerald-50 p-4 rounded-2xl border border-emerald-100 mb-6 cursor-pointer hover:bg-emerald-100 transition-colors" onClick={() => setHasConfirmedUpload(!hasConfirmedUpload)}>
+                          <div className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${hasConfirmedUpload ? 'bg-emerald-600 border-emerald-600' : 'bg-white border-emerald-300'}`}>
+                            {hasConfirmedUpload && <Check size={14} className="text-white" />}
+                          </div>
+                          <span className="text-[10px] text-emerald-800 font-bold leading-tight uppercase tracking-tight">SAYA MENYATAKAN BAHWA SUDAH UPLOAD DOKUMEN FINAL KE FOLDER GOOGLE DRIVE DENGAN BENAR</span>
+                        </div>
+
+                        <div className="flex gap-3">
+                          <button 
+                            onClick={() => { setShowDeclaration(false); setHasConfirmedUpload(false); }}
+                            className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-[11px] uppercase tracking-wider hover:bg-slate-200 transition-colors"
+                          >
+                            Batal
+                          </button>
+                          <button 
+                            onClick={handleConfirmUpload}
+                            disabled={saving || !hasConfirmedUpload}
+                            className="flex-[1.5] px-4 py-3 bg-emerald-600 text-white rounded-xl font-black text-[11px] uppercase tracking-wider hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-100 disabled:opacity-50"
+                          >
+                            {saving ? 'MEMPROSES...' : 'YA, KONFIRMASI'}
+                          </button>
+                        </div>
+                      </motion.div>
+                    </div>
+                  )}
+                </AnimatePresence>
 
                 {(() => {
                   const docData = finalDocs.find(d => d.id === user.uid);
