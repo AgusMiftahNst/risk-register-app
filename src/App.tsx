@@ -1333,8 +1333,17 @@ export default function App() {
               animate={{ opacity: 1 }}
               className="font-bold text-xl tracking-tight text-white flex items-center gap-2"
             >
-              <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center">R</div>
-              RISK REG
+              <img 
+                src="https://sippa.papuatengahprov.go.id/layout/dist/img/logo.png" 
+                alt="Logo" 
+                className="w-8 h-8 object-contain brightness-125 shadow-sm"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  target.src = "https://upload.wikimedia.org/wikipedia/id/8/87/Lambang_Papua_Tengah.png";
+                }}
+              />
+              <span className="bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">MANRISK</span>
             </motion.div>
           )}
           <button 
@@ -2197,13 +2206,17 @@ function LoginPage({ onLogin, accounts }: { onLogin: (userData: any) => void, ac
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5 }}
-        className="mb-8"
+        className="mb-8 relative"
       >
         <img 
-          src="https://upload.wikimedia.org/wikipedia/id/8/87/Lambang_Papua_Tengah.png" 
+          src="https://sippa.papuatengahprov.go.id/layout/dist/img/logo.png" 
           alt="Logo Papua Tengah" 
-          className="w-40 h-auto drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] object-contain"
+          className="w-32 h-auto drop-shadow-2xl object-contain transition-transform hover:scale-105 duration-500 brightness-110"
           referrerPolicy="no-referrer"
+          onError={(e) => {
+            const target = e.target as HTMLImageElement;
+            target.src = "https://upload.wikimedia.org/wikipedia/id/8/87/Lambang_Papua_Tengah.png";
+          }}
         />
       </motion.div>
 
@@ -2854,9 +2867,20 @@ function RiskAnalysisView({ user, isReadOnly, riskType }: { user: any, isReadOnl
                 return (
                   <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-6 text-center font-bold text-slate-400 border-r border-slate-100">{idx + 1}</td>
-                    <td className="px-4 py-6 border-r border-slate-100">
+                    <td className="px-4 py-6 border-r border-slate-100 min-w-[200px]">
                       <p className="text-blue-600 font-black mb-1 text-[9px]">{row.risikoKode || (riskType === 'operasional' ? 'ROO...' : 'RSO...')}</p>
-                      <p className="text-slate-700 font-medium leading-relaxed uppercase text-[10px]">{row.risikoUraian || '(Uraian belum diisi)'}</p>
+                      <p className="text-slate-700 font-medium leading-relaxed uppercase text-[10px] mb-2">{row.risikoUraian || '(Uraian belum diisi)'}</p>
+                      
+                      {row.subRows && row.subRows.length > 0 && (
+                        <div className="space-y-1">
+                          {row.subRows.map((sub: any, sIdx: number) => (
+                            <div key={sIdx} className="bg-slate-50 p-1.5 rounded text-[8px] border border-slate-100">
+                              <p className="text-slate-500 italic"><span className="font-bold opacity-50">Sebab {sIdx + 1}:</span> {sub.sebabUraian}</p>
+                              <p className="text-red-700/70"><span className="font-bold opacity-50">Dampak {sIdx + 1}:</span> {sub.dampakUraian}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </td>
                     
                     {/* Dampak Details */}
@@ -3055,7 +3079,20 @@ function RiskResidualView({ user, isReadOnly, riskType }: { user: any, isReadOnl
                     <td className="px-2 py-4 font-bold text-slate-400 text-center">{idx + 1}</td>
                     <td className="px-3 py-4 min-w-[200px]">
                       <p className="font-black text-blue-600 text-[9px] mb-1">{row.risikoKode || (riskType === 'operasional' ? 'ROO...' : 'RSO...')}</p>
-                      <p className="font-medium text-slate-700 uppercase leading-tight">{row.risikoUraian || '(Belum diisi)'}</p>
+                      <p className="font-medium text-slate-700 uppercase leading-tight mb-2">{row.risikoUraian || '(Belum diisi)'}</p>
+                      
+                      {row.subRows && row.subRows.length > 0 && (
+                        <div className="space-y-1">
+                          {row.subRows.map((sub: any, sIdx: number) => (
+                            <div key={sIdx} className="bg-slate-50 p-1.5 rounded text-[8px] border border-slate-100 italic">
+                               <p className="text-slate-500 font-bold opacity-50 uppercase text-[7px] mb-0.5">Sebab {sIdx + 1}</p>
+                               <p className="text-slate-600 mb-1">{sub.sebabUraian}</p>
+                               <p className="text-red-800 font-bold opacity-30 uppercase text-[7px] mb-0.5">Dampak {sIdx + 1}</p>
+                               <p className="text-red-600">{sub.dampakUraian}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </td>
                     <td className="px-2 py-4 text-center border-r border-slate-100 bg-slate-50/20 text-slate-500 italic">
                       {row.avgD?.toFixed(2) || '0.00'}
@@ -3489,11 +3526,16 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
         risikoUraian: '',
         risikoKode: '',
         pemilik: '',
-        sebabUraian: '',
-        sebabSumber: '',
-        control: '',
-        dampakUraian: '',
-        dampakPihak: '',
+        // Initialize with one sub-row
+        subRows: [
+          {
+            sebabUraian: '',
+            sebabSumber: '',
+            control: '',
+            dampakUraian: '',
+            dampakPihak: ''
+          }
+        ],
         dampakScores: [0, 0, 0, 0, 0],
         kemungkinanScores: [0, 0, 0, 0, 0],
         order: orderValue,
@@ -3507,7 +3549,7 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
       alert('Gagal menambah data: ' + error.message);
       handleFirestoreError(error, OperationType.CREATE, path);
     }
-  }, [rows, user?.username, user?.uid]);
+  }, [rows, user?.username, user?.uid, riskType]);
 
   useEffect(() => {
     const handleAddRow = () => addRow();
@@ -3529,7 +3571,57 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
       alert('Gagal menghapus: ' + err.message);
       handleFirestoreError(err, OperationType.DELETE, `risk_identification/${id}`);
     }
-  }, []);
+  }, [isReadOnly]);
+
+  // Handle sub-row operations
+  const updateSubRowField = async (rowId: string, subRows: any[], subIdx: number, field: string, value: any) => {
+    if (isReadOnly) return;
+    const newSubRows = [...subRows];
+    newSubRows[subIdx] = { ...newSubRows[subIdx], [field]: value };
+    try {
+      await updateDoc(doc(db, 'risk_identification', rowId), {
+        subRows: newSubRows,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `risk_identification/${rowId}`);
+    }
+  };
+
+  const addSubRow = async (rowId: string, subRows: any[]) => {
+    if (isReadOnly) return;
+    const newSubRows = [
+      ...subRows,
+      {
+        sebabUraian: '',
+        sebabSumber: '',
+        control: '',
+        dampakUraian: '',
+        dampakPihak: ''
+      }
+    ];
+    try {
+      await updateDoc(doc(db, 'risk_identification', rowId), {
+        subRows: newSubRows,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `risk_identification/${rowId}`);
+    }
+  };
+
+  const removeSubRow = async (rowId: string, subRows: any[], subIdx: number) => {
+    if (isReadOnly || subRows.length <= 1) return;
+    const newSubRows = subRows.filter((_, i) => i !== subIdx);
+    try {
+      await updateDoc(doc(db, 'risk_identification', rowId), {
+        subRows: newSubRows,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `risk_identification/${rowId}`);
+    }
+  };
 
   // Manual sync function
   const runSync = async () => {
@@ -3661,156 +3753,192 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {displayRows.map((row: any, idx: number) => (
-                <tr key={row.id} className="group hover:bg-slate-50 transition-colors align-top">
-                  <td className="px-1 py-4 text-center border-r border-slate-100 align-middle">
-                    {!isReadOnly && (
-                      <button 
-                        type="button"
-                        onClick={() => {
-                          if (row && row.id) {
-                            deleteRow(row.id);
-                          }
-                        }}
-                        className="text-red-500 hover:text-red-700 transition-colors p-1"
-                        title="Hapus Baris"
-                      >
-                        <X size={16} />
-                      </button>
-                    )}
-                  </td>
-                  <td className="px-2 py-4 border-r border-slate-100 text-center font-bold">{idx + 1}</td>
-                  <td className="px-2 py-4 border-r border-slate-100">
-                    <div className="flex flex-col gap-2">
-                      <textarea 
-                        className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
-                        rows={3} 
-                        value={row.tujuan} 
-                        onChange={e => updateField(row.id, 'tujuan', e.target.value)}
-                        disabled={isReadOnly}
-                      />
-                      {!isReadOnly && (
-                        <button 
-                          type="button"
-                          onClick={() => addRow(row.tujuan, row.indikator, (row.order || 0) + 0.001)}
-                          className="opacity-0 group-hover:opacity-100 self-start text-[8px] font-black uppercase bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 transition-all flex items-center gap-1 shadow-sm border border-blue-100"
-                        >
-                           <Plus size={8} /> Tambah Risiko
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-2 py-4 border-r border-slate-100">
-                    <textarea 
-                      className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
-                      rows={3} 
-                      value={row.indikator} 
-                      onChange={e => updateField(row.id, 'indikator', e.target.value)}
-                      disabled={isReadOnly}
-                    />
-                  </td>
-                  <td className="px-2 py-4 border-r border-slate-100">
-                    <textarea 
-                      className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
-                      rows={3} 
-                      value={row.risikoUraian} 
-                      onChange={e => updateField(row.id, 'risikoUraian', e.target.value)}
-                      disabled={isReadOnly}
-                    />
-                  </td>
-                  <td className="px-2 py-4 border-r border-slate-100 font-mono text-blue-600 font-bold bg-slate-50/50 text-center">
-                    {(() => {
-                      const prefix = riskType === 'operasional' ? 'ROO' : 'RSO';
-                      const defaultCode = `${prefix}.26.00.00.00`;
-                      const codeParts = (row.risikoKode || defaultCode).split('.');
-                      const p1 = codeParts[2] || '00';
-                      const p2 = codeParts[3] || '00';
-                      const p3 = codeParts[4] || '00';
-                      
-                      return (
-                        <div className="flex items-center justify-center gap-0.5 text-[9px]">
-                          <span className="text-slate-400 select-none font-bold">{prefix}.26.</span>
-                          <input 
-                            type="text"
-                            value={p1}
-                            onChange={(e) => updateRiskCodeSegment(row.id, row.risikoKode, 0, e.target.value)}
-                            className="w-6 bg-white border border-slate-200 rounded text-center focus:border-blue-400 outline-none hover:border-slate-300 transition-colors py-0.5 disabled:opacity-50"
+              {displayRows.map((row: any, idx: number) => {
+                const subRows = row.subRows && row.subRows.length > 0 ? row.subRows : [
+                  {
+                    sebabUraian: row.sebabUraian || '',
+                    sebabSumber: row.sebabSumber || '',
+                    control: row.control || '',
+                    dampakUraian: row.dampakUraian || '',
+                    dampakPihak: row.dampakPihak || ''
+                  }
+                ];
+
+                return (
+                  <React.Fragment key={row.id}>
+                    {subRows.map((sub: any, sIdx: number) => (
+                      <tr key={`${row.id}-${sIdx}`} className="group hover:bg-slate-50 transition-colors align-top">
+                        {sIdx === 0 && (
+                          <>
+                            <td className="px-1 py-4 text-center border-r border-slate-100 align-middle" rowSpan={subRows.length}>
+                              {!isReadOnly && (
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    if (row && row.id) {
+                                      deleteRow(row.id);
+                                    }
+                                  }}
+                                  className="text-red-500 hover:text-red-700 transition-colors p-1"
+                                  title="Hapus Baris"
+                                >
+                                  <X size={16} />
+                                </button>
+                              )}
+                            </td>
+                            <td className="px-2 py-4 border-r border-slate-100 text-center font-bold" rowSpan={subRows.length}>{idx + 1}</td>
+                            <td className="px-2 py-4 border-r border-slate-100" rowSpan={subRows.length}>
+                              <div className="flex flex-col gap-2">
+                                <textarea 
+                                  className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
+                                  rows={3} 
+                                  value={row.tujuan} 
+                                  onChange={e => updateField(row.id, 'tujuan', e.target.value)}
+                                  disabled={isReadOnly}
+                                />
+                                {!isReadOnly && (
+                                  <button 
+                                    type="button"
+                                    onClick={() => addRow(row.tujuan, row.indikator, (row.order || 0) + 0.001)}
+                                    className="opacity-0 group-hover:opacity-100 self-start text-[8px] font-black uppercase bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 transition-all flex items-center gap-1 shadow-sm border border-blue-100"
+                                  >
+                                    <Plus size={8} /> Tambah Risiko
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-2 py-4 border-r border-slate-100" rowSpan={subRows.length}>
+                              <textarea 
+                                className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
+                                rows={3} 
+                                value={row.indikator} 
+                                onChange={e => updateField(row.id, 'indikator', e.target.value)}
+                                disabled={isReadOnly}
+                              />
+                            </td>
+                            <td className="px-2 py-4 border-r border-slate-100" rowSpan={subRows.length}>
+                              <textarea 
+                                className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
+                                rows={3} 
+                                value={row.risikoUraian} 
+                                onChange={e => updateField(row.id, 'risikoUraian', e.target.value)}
+                                disabled={isReadOnly}
+                              />
+                            </td>
+                            <td className="px-2 py-4 border-r border-slate-100 font-mono text-blue-600 font-bold bg-slate-50/50 text-center" rowSpan={subRows.length}>
+                              {(() => {
+                                const prefix = riskType === 'operasional' ? 'ROO' : 'RSO';
+                                const defaultCode = `${prefix}.26.00.00.00`;
+                                const codeParts = (row.risikoKode || defaultCode).split('.');
+                                const p1 = codeParts[2] || '00';
+                                const p2 = codeParts[3] || '00';
+                                const p3 = codeParts[4] || '00';
+                                
+                                return (
+                                  <div className="flex items-center justify-center gap-0.5 text-[9px]">
+                                    <span className="text-slate-400 select-none font-bold">{prefix}.26.</span>
+                                    <input 
+                                      type="text"
+                                      value={p1}
+                                      onChange={(e) => updateRiskCodeSegment(row.id, row.risikoKode, 0, e.target.value)}
+                                      className="w-6 bg-white border border-slate-200 rounded text-center focus:border-blue-400 outline-none hover:border-slate-300 transition-colors py-0.5 disabled:opacity-50"
+                                      disabled={isReadOnly}
+                                    />
+                                    <span className="text-slate-400 select-none">.</span>
+                                    <input 
+                                      type="text"
+                                      value={p2}
+                                      onChange={(e) => updateRiskCodeSegment(row.id, row.risikoKode, 1, e.target.value)}
+                                      className="w-6 bg-white border border-slate-200 rounded text-center focus:border-blue-400 outline-none hover:border-slate-300 transition-colors py-0.5 disabled:opacity-50"
+                                      disabled={isReadOnly}
+                                    />
+                                    <span className="text-slate-400 select-none">.</span>
+                                    <input 
+                                      type="text"
+                                      value={p3}
+                                      onChange={(e) => updateRiskCodeSegment(row.id, row.risikoKode, 2, e.target.value)}
+                                      className="w-6 bg-white border border-slate-200 rounded text-center focus:border-blue-400 outline-none hover:border-slate-300 transition-colors py-0.5 disabled:opacity-50"
+                                      disabled={isReadOnly}
+                                    />
+                                  </div>
+                                );
+                              })()}
+                            </td>
+                            <td className="px-2 py-4 border-r border-slate-100" rowSpan={subRows.length}>
+                              <textarea 
+                                className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
+                                rows={3} 
+                                value={row.pemilik} 
+                                onChange={e => updateField(row.id, 'pemilik', e.target.value)}
+                                disabled={isReadOnly}
+                              />
+                            </td>
+                          </>
+                        )}
+                        <td className="px-2 py-4 border-r border-slate-100 italic relative group/sub">
+                          <textarea 
+                            className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
+                            rows={3} 
+                            value={sub.sebabUraian} 
+                            onChange={e => updateSubRowField(row.id, subRows, sIdx, 'sebabUraian', e.target.value)}
                             disabled={isReadOnly}
                           />
-                          <span className="text-slate-400 select-none">.</span>
+                          {!isReadOnly && sIdx === subRows.length - 1 && (
+                            <button 
+                              onClick={() => addSubRow(row.id, subRows)}
+                              className="absolute -bottom-1 right-1 text-[7px] font-black uppercase text-blue-600 bg-blue-50 px-1 py-0.5 rounded shadow-sm opacity-0 group-hover/sub:opacity-100 transition-all hover:bg-blue-100 flex items-center gap-0.5 z-10"
+                            >
+                              <Plus size={8} /> Tambah Sebab
+                            </button>
+                          )}
+                          {!isReadOnly && subRows.length > 1 && (
+                            <button 
+                              onClick={() => removeSubRow(row.id, subRows, sIdx)}
+                              className="absolute -bottom-1 left-1 text-[7px] font-black uppercase text-red-600 bg-red-50 px-1 py-0.5 rounded shadow-sm opacity-0 group-hover/sub:opacity-100 transition-all hover:bg-red-100 flex items-center gap-0.5 z-10"
+                            >
+                              <X size={8} /> Hapus
+                            </button>
+                          )}
+                        </td>
+                        <td className="px-2 py-4 border-r border-slate-100 text-center">
                           <input 
-                            type="text"
-                            value={p2}
-                            onChange={(e) => updateRiskCodeSegment(row.id, row.risikoKode, 1, e.target.value)}
-                            className="w-6 bg-white border border-slate-200 rounded text-center focus:border-blue-400 outline-none hover:border-slate-300 transition-colors py-0.5 disabled:opacity-50"
+                            className="w-full bg-transparent p-0 outline-none text-center disabled:text-slate-500" 
+                            value={sub.sebabSumber} 
+                            onChange={e => updateSubRowField(row.id, subRows, sIdx, 'sebabSumber', e.target.value)}
                             disabled={isReadOnly}
                           />
-                          <span className="text-slate-400 select-none">.</span>
+                        </td>
+                        <td className="px-2 py-4 border-r border-slate-100 text-center font-black">
                           <input 
-                            type="text"
-                            value={p3}
-                            onChange={(e) => updateRiskCodeSegment(row.id, row.risikoKode, 2, e.target.value)}
-                            className="w-6 bg-white border border-slate-200 rounded text-center focus:border-blue-400 outline-none hover:border-slate-300 transition-colors py-0.5 disabled:opacity-50"
+                            className="w-full bg-transparent p-0 outline-none text-center disabled:text-slate-500" 
+                            value={sub.control} 
+                            onChange={e => updateSubRowField(row.id, subRows, sIdx, 'control', e.target.value)}
                             disabled={isReadOnly}
                           />
-                        </div>
-                      );
-                    })()}
-                  </td>
-                  <td className="px-2 py-4 border-r border-slate-100">
-                    <textarea 
-                      className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
-                      rows={3} 
-                      value={row.pemilik} 
-                      onChange={e => updateField(row.id, 'pemilik', e.target.value)}
-                      disabled={isReadOnly}
-                    />
-                  </td>
-                  <td className="px-2 py-4 border-r border-slate-100 italic">
-                    <textarea 
-                      className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
-                      rows={3} 
-                      value={row.sebabUraian} 
-                      onChange={e => updateField(row.id, 'sebabUraian', e.target.value)}
-                      disabled={isReadOnly}
-                    />
-                  </td>
-                  <td className="px-2 py-4 border-r border-slate-100 text-center">
-                    <input 
-                      className="w-full bg-transparent p-0 outline-none text-center disabled:text-slate-500" 
-                      value={row.sebabSumber} 
-                      onChange={e => updateField(row.id, 'sebabSumber', e.target.value)}
-                      disabled={isReadOnly}
-                    />
-                  </td>
-                  <td className="px-2 py-4 border-r border-slate-100 text-center font-black">
-                    <input 
-                      className="w-full bg-transparent p-0 outline-none text-center disabled:text-slate-500" 
-                      value={row.control} 
-                      onChange={e => updateField(row.id, 'control', e.target.value)}
-                      disabled={isReadOnly}
-                    />
-                  </td>
-                  <td className="px-2 py-4 border-r border-slate-100 text-red-600">
-                    <textarea 
-                      className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
-                      rows={3} 
-                      value={row.dampakUraian} 
-                      onChange={e => updateField(row.id, 'dampakUraian', e.target.value)}
-                      disabled={isReadOnly}
-                    />
-                  </td>
-                  <td className="px-2 py-4">
-                    <textarea 
-                      className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
-                      rows={3} 
-                      value={row.dampakPihak} 
-                      onChange={e => updateField(row.id, 'dampakPihak', e.target.value)}
-                      disabled={isReadOnly}
-                    />
-                  </td>
-                </tr>
-              ))}
+                        </td>
+                        <td className="px-2 py-4 border-r border-slate-100 text-red-600">
+                          <textarea 
+                            className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500 font-italic" 
+                            rows={3} 
+                            value={sub.dampakUraian} 
+                            onChange={e => updateSubRowField(row.id, subRows, sIdx, 'dampakUraian', e.target.value)}
+                            disabled={isReadOnly}
+                          />
+                        </td>
+                        <td className="px-2 py-4">
+                          <textarea 
+                            className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
+                            rows={3} 
+                            value={sub.dampakPihak} 
+                            onChange={e => updateSubRowField(row.id, subRows, sIdx, 'dampakPihak', e.target.value)}
+                            disabled={isReadOnly}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
