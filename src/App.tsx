@@ -2999,6 +2999,63 @@ function RiskAnalysisView({ user, isReadOnly, riskType }: { user: any, isReadOnl
     return () => unsubscribe();
   }, [contextId]);
 
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pasteData, setPasteData] = useState('');
+  const [pasteType, setPasteType] = useState<'dampak' | 'kemungkinan' | 'total'>('total');
+
+  const processImport = async () => {
+    if (!pasteData.trim()) return;
+    try {
+      const rawRows = pasteData.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (rawRows.length === 0) return;
+
+      setLoading(true);
+      setShowPasteModal(false);
+
+      for (const line of rawRows) {
+        const cols = line.split('\t');
+        if (cols.length < 2) continue;
+
+        const [kode, ...scores] = cols;
+        const targetRow = rows.find(r => r.risikoKode === kode.trim());
+        if (!targetRow) continue;
+
+        const parsedScores = scores.map(s => parseInt(s) || 0);
+
+        if (pasteType === 'total') {
+          // Legacy/Total logic: assumes Impact scores followed by Probability scores
+          const dScores = parsedScores.slice(0, participantCount);
+          const pScores = parsedScores.slice(participantCount, participantCount * 2);
+          await updateDoc(doc(db, 'risk_identification', targetRow.id), {
+            dampakScores: dScores,
+            kemungkinanScores: pScores,
+            updatedAt: new Date().toISOString()
+          });
+        } else {
+          const field = pasteType === 'dampak' ? 'dampakScores' : 'kemungkinanScores';
+          await updateDoc(doc(db, 'risk_identification', targetRow.id), {
+            [field]: parsedScores.slice(0, participantCount),
+            updatedAt: new Date().toISOString()
+          });
+        }
+      }
+
+      setPasteData('');
+      alert(`Berhasil mengimpor skor ${pasteType === 'total' ? 'analisis' : pasteType}.`);
+    } catch (err) {
+      console.error('Import error:', err);
+      alert('Gagal mengimpor data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openPasteModal = (type: typeof pasteType) => {
+    setPasteType(type);
+    setPasteData('');
+    setShowPasteModal(true);
+  };
+
   const updateScores = async (id: string, type: 'dampak' | 'kemungkinan', scores: number[]) => {
     if (isReadOnly) return;
     try {
@@ -3033,27 +3090,59 @@ function RiskAnalysisView({ user, isReadOnly, riskType }: { user: any, isReadOnl
 
   return (
     <div className="space-y-12">
+      <div className="flex justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm mb-6">
+        <div>
+          <h3 className="font-black text-xs uppercase tracking-widest text-slate-700">Analisis Risiko (DxS)</h3>
+          <p className="text-[10px] text-slate-500 font-medium italic">Matriks Pergub No 67 Thn 2023</p>
+        </div>
+      </div>
+
       <div className="space-y-8">
-        <ScoreTable 
-          title="Dampak" 
-          type="dampak" 
-          color="border-red-500" 
-          rows={rows} 
-          participantCount={participantCount}
-          updateScores={updateScores}
-          onUpdateParticipantCount={updateParticipantCount}
-          isReadOnly={isReadOnly}
-        />
-        <ScoreTable 
-          title="Kemungkinan" 
-          type="kemungkinan" 
-          color="border-blue-500" 
-          rows={rows} 
-          participantCount={participantCount}
-          updateScores={updateScores}
-          onUpdateParticipantCount={updateParticipantCount}
-          isReadOnly={isReadOnly}
-        />
+        <div className="space-y-2">
+          {!isReadOnly && (
+            <div className="flex justify-end px-2">
+              <button 
+                onClick={() => openPasteModal('dampak')}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 transition-all text-[9px] font-black uppercase tracking-wider"
+              >
+                <ClipboardList size={14} /> Paste Skor Dampak (Excel)
+              </button>
+            </div>
+          )}
+          <ScoreTable 
+            title="Dampak" 
+            type="dampak" 
+            color="border-red-500" 
+            rows={rows} 
+            participantCount={participantCount}
+            updateScores={updateScores}
+            onUpdateParticipantCount={updateParticipantCount}
+            isReadOnly={isReadOnly}
+          />
+        </div>
+
+        <div className="space-y-2">
+          {!isReadOnly && (
+            <div className="flex justify-end px-2">
+              <button 
+                onClick={() => openPasteModal('kemungkinan')}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition-all text-[9px] font-black uppercase tracking-wider"
+              >
+                <ClipboardList size={14} /> Paste Skor Kemungkinan (Excel)
+              </button>
+            </div>
+          )}
+          <ScoreTable 
+            title="Kemungkinan" 
+            type="kemungkinan" 
+            color="border-blue-500" 
+            rows={rows} 
+            participantCount={participantCount}
+            updateScores={updateScores}
+            onUpdateParticipantCount={updateParticipantCount}
+            isReadOnly={isReadOnly}
+          />
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm pt-4">
@@ -3061,6 +3150,43 @@ function RiskAnalysisView({ user, isReadOnly, riskType }: { user: any, isReadOnl
           <h4 className="font-bold text-[10px] uppercase border-l-2 border-emerald-400 pl-3 italic tracking-wider">Kertas Kerja Hasil Analisis Risiko (DxS)</h4>
           <span className="text-[9px] font-mono italic opacity-60">Matriks Pergub No 67 Thn 2023</span>
         </div>
+
+        {showPasteModal && (
+          <div className="fixed inset-0 z-[200] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
+              <div className={`p-4 ${pasteType === 'dampak' ? 'bg-red-600' : pasteType === 'kemungkinan' ? 'bg-blue-600' : 'bg-emerald-600'} flex items-center justify-between`}>
+                <div>
+                  <h3 className="text-white font-black text-xs uppercase tracking-widest">
+                    Paste Skor {pasteType === 'total' ? 'Analisis' : (pasteType === 'dampak' ? 'Dampak' : 'Kemungkinan')} dari Excel
+                  </h3>
+                  <p className="text-white/80 text-[9px] font-bold mt-0.5">
+                    Panduan: Copy kolom Kode dan Nilai Skor di Excel (Kode | P1 | P2 | ...)
+                  </p>
+                </div>
+                <button onClick={() => setShowPasteModal(false)} className="text-white/80 hover:text-white"><X size={18} /></button>
+              </div>
+              <div className="p-6 flex-1">
+                <textarea 
+                  autoFocus
+                  placeholder="Paste di sini..."
+                  className={`w-full h-64 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-4 text-[10px] outline-none focus:ring-4 ${pasteType === 'dampak' ? 'focus:border-red-500 focus:ring-red-500/5' : pasteType === 'kemungkinan' ? 'focus:border-blue-500 focus:ring-blue-500/5' : 'focus:border-emerald-500 focus:ring-emerald-500/5'} resize-none font-mono`}
+                  value={pasteData}
+                  onChange={(e) => setPasteData(e.target.value)}
+                ></textarea>
+              </div>
+              <div className="p-4 bg-slate-50 border-t flex justify-end gap-3">
+                <button onClick={() => setShowPasteModal(false)} className="px-6 py-2 text-slate-500 font-bold text-[10px] uppercase">Batal</button>
+                <button 
+                  onClick={processImport} 
+                  disabled={!pasteData.trim()} 
+                  className={`px-8 py-2 ${pasteType === 'dampak' ? 'bg-red-600 hover:bg-red-700' : pasteType === 'kemungkinan' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'} text-white font-black text-[10px] uppercase rounded-lg shadow-lg tracking-widest`}
+                >
+                  Impor
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[1200px]">
             <thead className="bg-slate-900 text-white uppercase text-[9px] font-black tracking-widest">
@@ -3253,6 +3379,43 @@ function RiskResidualView({ user, isReadOnly, riskType }: { user: any, isReadOnl
     return () => unsubscribe();
   }, [user.uid, participantCount, riskType]);
 
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pasteData, setPasteData] = useState('');
+
+  const processImport = async () => {
+    if (!pasteData.trim()) return;
+    try {
+      const rawRows = pasteData.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (rawRows.length === 0) return;
+      setLoading(true);
+      setShowPasteModal(false);
+
+      for (const line of rawRows) {
+        const cols = line.split('\t');
+        if (cols.length < 2) continue;
+
+        const [kode, control, gap, d, k] = cols;
+        const targetRow = rows.find(r => r.risikoKode === kode.trim());
+        if (!targetRow) continue;
+
+        await updateDoc(doc(db, 'risk_identification', targetRow.id), {
+          rtpControl: (control || '').trim(),
+          rtpGap: (gap || '').trim(),
+          residualDampak: parseFloat(d) || 0,
+          residualKemungkinan: parseFloat(k) || 0,
+          updatedAt: new Date().toISOString()
+        });
+      }
+      setPasteData('');
+      alert('Berhasil mengimpor data penilaian residual.');
+    } catch (err) {
+      console.error('Import error:', err);
+      alert('Gagal mengimpor data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const updateResidualField = async (id: string, field: string, value: any) => {
     if (isReadOnly) return;
     try {
@@ -3270,9 +3433,44 @@ function RiskResidualView({ user, isReadOnly, riskType }: { user: any, isReadOnl
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-          <h4 className="font-bold text-slate-700 uppercase border-l-4 border-blue-500 pl-3 italic">Identifikasi Risiko Aktual & Risiko Sisa</h4>
+        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+          <h4 className="font-bold text-slate-700 uppercase border-l-4 border-blue-500 pl-3 italic text-xs">Identifikasi Risiko Aktual & Risiko Sisa</h4>
+          {!isReadOnly && (
+            <button 
+              onClick={() => setShowPasteModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-all text-[10px] font-bold uppercase tracking-wider shadow-sm"
+            >
+              <ClipboardList size={14} /> Paste Penilaian Residual (Excel)
+            </button>
+          )}
         </div>
+
+        {showPasteModal && (
+          <div className="fixed inset-0 z-[200] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
+              <div className="p-4 bg-blue-600 flex items-center justify-between">
+                <div>
+                  <h3 className="text-white font-black text-xs uppercase tracking-widest">Paste Penilaian Residual dari Excel</h3>
+                  <p className="text-blue-100 text-[9px] font-bold mt-0.5">Kolom: Kode | Pengendalian | Celah | D | K</p>
+                </div>
+                <button onClick={() => setShowPasteModal(false)} className="text-white/80 hover:text-white"><X size={18} /></button>
+              </div>
+              <div className="p-6 flex-1">
+                <textarea 
+                  autoFocus
+                  placeholder="Paste di sini..."
+                  className="w-full h-64 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-4 text-[10px] outline-none focus:border-blue-500 resize-none font-mono"
+                  value={pasteData}
+                  onChange={(e) => setPasteData(e.target.value)}
+                ></textarea>
+              </div>
+              <div className="p-4 bg-slate-50 border-t flex justify-end gap-3">
+                <button onClick={() => setShowPasteModal(false)} className="px-6 py-2 text-slate-500 font-bold text-[10px] uppercase">Batal</button>
+                <button onClick={processImport} disabled={!pasteData.trim()} className="px-8 py-2 bg-blue-600 text-white font-black text-[10px] uppercase rounded-lg">Impor</button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-[10px] text-left">
             <thead className="bg-slate-900 text-white uppercase font-bold tracking-wider text-[9px]">
@@ -3475,6 +3673,42 @@ function RiskTreatmentView({ user, isReadOnly, riskType }: { user: any, isReadOn
     return () => unsubscribe();
   }, [user.uid]);
 
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pasteData, setPasteData] = useState('');
+
+  const processImport = async () => {
+    if (!pasteData.trim()) return;
+    try {
+      const rawRows = pasteData.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (rawRows.length === 0) return;
+      setLoading(true);
+      setShowPasteModal(false);
+
+      for (const line of rawRows) {
+        const cols = line.split('\t');
+        if (cols.length < 2) continue;
+
+        const [kode, action, pj, deadline] = cols;
+        const targetRow = rows.find(r => r.risikoKode === kode.trim());
+        if (!targetRow) continue;
+
+        await updateDoc(doc(db, 'risk_identification', targetRow.id), {
+          rtpAction: (action || '').trim(),
+          rtpPJ: (pj || '').trim(),
+          rtpDeadline: (deadline || '').trim(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      setPasteData('');
+      alert('Berhasil mengimpor data rencana penanganan.');
+    } catch (err) {
+      console.error('Import error:', err);
+      alert('Gagal mengimpor data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const updateTreatmentField = async (id: string, field: string, value: string) => {
     if (isReadOnly) return;
     try {
@@ -3494,9 +3728,44 @@ function RiskTreatmentView({ user, isReadOnly, riskType }: { user: any, isReadOn
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
           <h4 className="font-bold text-slate-700 uppercase border-l-4 border-indigo-500 pl-3 italic text-xs">Rencana Tindak Pengendalian (RTP) - Berdasarkan Risiko Residual</h4>
+          {!isReadOnly && (
+            <button 
+              onClick={() => setShowPasteModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-all text-[10px] font-bold uppercase tracking-wider"
+            >
+              <ClipboardList size={14} /> Paste RTP dari Excel
+            </button>
+          )}
         </div>
+
+        {showPasteModal && (
+          <div className="fixed inset-0 z-[200] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
+              <div className="p-4 bg-indigo-600 flex items-center justify-between">
+                <div>
+                  <h3 className="text-white font-black text-xs uppercase tracking-widest">Paste RTP dari Excel</h3>
+                  <p className="text-indigo-100 text-[9px] font-bold mt-0.5">Kolom: Kode | Rencana RTP | PJ | Deadline</p>
+                </div>
+                <button onClick={() => setShowPasteModal(false)} className="text-white/80 hover:text-white"><X size={18} /></button>
+              </div>
+              <div className="p-6 flex-1">
+                <textarea 
+                  autoFocus
+                  placeholder="Paste di sini..."
+                  className="w-full h-64 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-4 text-[10px] outline-none focus:border-indigo-500 resize-none font-mono"
+                  value={pasteData}
+                  onChange={(e) => setPasteData(e.target.value)}
+                ></textarea>
+              </div>
+              <div className="p-4 bg-slate-50 border-t flex justify-end gap-3">
+                <button onClick={() => setShowPasteModal(false)} className="px-6 py-2 text-slate-500 font-bold text-[10px] uppercase">Batal</button>
+                <button onClick={processImport} disabled={!pasteData.trim()} className="px-8 py-2 bg-indigo-600 text-white font-black text-[10px] uppercase rounded-lg">Impor</button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-[10px] text-left">
             <thead className="bg-slate-900 text-white uppercase font-bold tracking-wider">
@@ -4582,6 +4851,72 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
     return () => unsubscribe();
   }, [storageKey, user.uid]);
 
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pasteData, setPasteData] = useState('');
+  const [pasteType, setPasteType] = useState<'sasaran' | 'ikuSasaran' | 'program' | 'ikuProgram' | 'assessment'>('assessment');
+
+  const processImport = async () => {
+    if (!pasteData.trim()) return;
+    try {
+      const rawRows = pasteData.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (rawRows.length === 0) return;
+
+      setLoading(true);
+      setShowPasteModal(false);
+      
+      const updates: any = {};
+
+      if (pasteType === 'sasaran') {
+        const newData = rawRows.map(line => line.trim()).filter(Boolean);
+        updates.sasaran = [...(formData.sasaran || []), ...newData];
+      } else if (pasteType === 'ikuSasaran') {
+        const newData = rawRows.map(line => {
+          const cols = line.split('\t');
+          return { name: (cols[0] || '').trim(), target: (cols[1] || '').trim() };
+        }).filter(item => item.name);
+        updates.ikuSasaran = [...(formData.ikuSasaran || []), ...newData];
+      } else if (pasteType === 'program') {
+        const newData = rawRows.map(line => line.trim()).filter(Boolean);
+        updates.program = [...(formData.program || []), ...newData];
+      } else if (pasteType === 'ikuProgram') {
+        const newData = rawRows.map(line => {
+          const cols = line.split('\t');
+          return { name: (cols[0] || '').trim(), target: (cols[1] || '').trim() };
+        }).filter(item => item.name);
+        updates.ikuProgram = [...(formData.ikuProgram || []), ...newData];
+      } else {
+        const newAssessmentRows = [...formData.assessmentRows];
+        for (const line of rawRows) {
+          const cols = line.split('\t');
+          if (cols.length < 1) continue;
+          const [tujuan, sasaran, program, iku] = cols;
+          newAssessmentRows.push({
+            tujuan: (tujuan || '').trim(),
+            sasaran: (sasaran || '').trim(),
+            program: (program || '').trim(),
+            iku: (iku || '').trim()
+          });
+        }
+        updates.assessmentRows = newAssessmentRows;
+      }
+
+      await updateData(updates);
+      setPasteData('');
+      alert('Berhasil mengimpor data.');
+    } catch (err) {
+      console.error('Import error:', err);
+      alert('Gagal mengimpor data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openPasteModal = (type: typeof pasteType) => {
+    setPasteType(type);
+    setPasteData('');
+    setShowPasteModal(true);
+  };
+
   const updateData = async (updates: any) => {
     try {
       await setDoc(doc(db, 'risk_context', storageKey), updates, { merge: true });
@@ -4615,9 +4950,47 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
         <p>Form 2.b</p>
       </div>
 
-      <h1 className="text-center font-black text-sm uppercase tracking-[0.2em] mb-12 italic border-b-2 border-slate-900 pb-4">
-        PENETAPAN KONTEKS RISIKO {riskType === 'operasional' ? 'OPERASIONAL' : 'STRATEGIS'} OPD
-      </h1>
+      <div className="flex justify-between items-center mb-12 italic border-b-2 border-slate-900 pb-4">
+        <h1 className="font-black text-sm uppercase tracking-[0.2em]">
+          PENETAPAN KONTEKS RISIKO {riskType === 'operasional' ? 'OPERASIONAL' : 'STRATEGIS'} OPD
+        </h1>
+      </div>
+
+      {showPasteModal && (
+        <div className="fixed inset-0 z-[200] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
+            <div className="p-4 bg-blue-600 flex items-center justify-between">
+              <div>
+                <h3 className="text-white font-black text-xs uppercase tracking-widest">
+                  Paste {pasteType === 'sasaran' ? (riskType === 'operasional' ? 'Program' : 'Sasaran') : 
+                         pasteType === 'ikuSasaran' ? (riskType === 'operasional' ? 'Kegiatan Utama' : 'IKU Sasaran') :
+                         pasteType === 'program' ? (riskType === 'operasional' ? 'Subkegiatan' : 'Program Strategis') :
+                         pasteType === 'ikuProgram' ? (riskType === 'operasional' ? 'Keluaran' : 'IKU Program') : 'Assessment'} dari Excel
+                </h3>
+                <p className="text-blue-100 text-[9px] font-bold mt-0.5">
+                  {pasteType === 'sasaran' || pasteType === 'program' ? 'Panduan: Copy list data di Excel (Satu kolom saja)' :
+                   pasteType === 'ikuSasaran' || pasteType === 'ikuProgram' ? 'Panduan: Copy 2 kolom di Excel (Uraian | Target)' :
+                   'Panduan: Copy 4 kolom di Excel (Tujuan | Sasaran | Program | IKU)'}
+                </p>
+              </div>
+              <button onClick={() => setShowPasteModal(false)} className="text-white/80 hover:text-white"><X size={18} /></button>
+            </div>
+            <div className="p-6 flex-1">
+              <textarea 
+                autoFocus
+                placeholder="Paste di sini..."
+                className="w-full h-64 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-4 text-[10px] outline-none focus:border-blue-500 resize-none font-mono"
+                value={pasteData}
+                onChange={(e) => setPasteData(e.target.value)}
+              ></textarea>
+            </div>
+            <div className="p-4 bg-slate-50 border-t flex justify-end gap-3">
+              <button onClick={() => setShowPasteModal(false)} className="px-6 py-2 text-slate-500 font-bold text-[10px] uppercase">Batal</button>
+              <button onClick={processImport} disabled={!pasteData.trim()} className="px-8 py-2 bg-blue-600 text-white font-black text-[10px] uppercase rounded-lg">Impor</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-1">
         <div className="grid grid-cols-3 gap-2">
@@ -4712,12 +5085,20 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
             {!isReadOnly && (
               <tr className="bg-slate-50/50">
                 <td colSpan={3} className="px-4 py-2">
-                  <button 
-                    onClick={() => updateData({ sasaran: [...(formData.sasaran || []), ''] })}
-                    className="flex items-center gap-2 text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition-all uppercase tracking-wider"
-                  >
-                    <Plus size={12} /> Tambah {riskType === 'operasional' ? 'Program' : 'Sasaran Strategis'}
-                  </button>
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={() => updateData({ sasaran: [...(formData.sasaran || []), ''] })}
+                      className="flex items-center gap-2 text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition-all uppercase tracking-wider"
+                    >
+                      <Plus size={12} /> Tambah {riskType === 'operasional' ? 'Program' : 'Sasaran Strategis'}
+                    </button>
+                    <button 
+                      onClick={() => openPasteModal('sasaran')}
+                      className="flex items-center gap-2 text-[10px] font-bold text-slate-600 hover:text-slate-700 hover:bg-slate-100 px-2 py-1 rounded transition-all uppercase tracking-wider border border-slate-200"
+                    >
+                      <ClipboardList size={12} /> Paste {riskType === 'operasional' ? 'Program' : 'Sasaran'} (Excel)
+                    </button>
+                  </div>
                 </td>
               </tr>
             )}
@@ -4774,12 +5155,20 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
             {!isReadOnly && (
               <tr className="bg-slate-50/50">
                 <td colSpan={3} className="px-4 py-2">
-                  <button 
-                    onClick={() => updateData({ ikuSasaran: [...(formData.ikuSasaran || []), { name: '', target: '' }] })}
-                    className="flex items-center gap-2 text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition-all uppercase tracking-wider"
-                  >
-                    <Plus size={12} /> Tambah {riskType === 'operasional' ? 'Kegiatan Utama' : 'IKU Sasaran OPD'}
-                  </button>
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={() => updateData({ ikuSasaran: [...(formData.ikuSasaran || []), { name: '', target: '' }] })}
+                      className="flex items-center gap-2 text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition-all uppercase tracking-wider"
+                    >
+                      <Plus size={12} /> Tambah {riskType === 'operasional' ? 'Kegiatan Utama' : 'IKU Sasaran OPD'}
+                    </button>
+                    <button 
+                      onClick={() => openPasteModal('ikuSasaran')}
+                      className="flex items-center gap-2 text-[10px] font-bold text-slate-600 hover:text-slate-700 hover:bg-slate-100 px-2 py-1 rounded transition-all uppercase tracking-wider border border-slate-200"
+                    >
+                      <ClipboardList size={12} /> Paste {riskType === 'operasional' ? 'Kegiatan Utama' : 'IKU'} (Excel)
+                    </button>
+                  </div>
                 </td>
               </tr>
             )}
@@ -4822,12 +5211,20 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
             {!isReadOnly && (
               <tr className="bg-slate-50/50">
                 <td colSpan={3} className="px-4 py-2">
-                  <button 
-                    onClick={() => updateData({ program: [...(formData.program || []), ''] })}
-                    className="flex items-center gap-2 text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition-all uppercase tracking-wider"
-                  >
-                    <Plus size={12} /> Tambah {riskType === 'operasional' ? 'Subkegiatan Utama' : 'Program Strategis'}
-                  </button>
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={() => updateData({ program: [...(formData.program || []), ''] })}
+                      className="flex items-center gap-2 text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition-all uppercase tracking-wider"
+                    >
+                      <Plus size={12} /> Tambah {riskType === 'operasional' ? 'Subkegiatan Utama' : 'Program Strategis'}
+                    </button>
+                    <button 
+                      onClick={() => openPasteModal('program')}
+                      className="flex items-center gap-2 text-[10px] font-bold text-slate-600 hover:text-slate-700 hover:bg-slate-100 px-2 py-1 rounded transition-all uppercase tracking-wider border border-slate-200"
+                    >
+                      <ClipboardList size={12} /> Paste {riskType === 'operasional' ? 'Subkegiatan' : 'Program'} (Excel)
+                    </button>
+                  </div>
                 </td>
               </tr>
             )}
@@ -4884,12 +5281,20 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
             {!isReadOnly && (
               <tr className="bg-slate-50/50">
                 <td colSpan={3} className="px-4 py-2">
-                  <button 
-                    onClick={() => updateData({ ikuProgram: [...(formData.ikuProgram || []), { name: '', target: '' }] })}
-                    className="flex items-center gap-2 text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition-all uppercase tracking-wider"
-                  >
-                    <Plus size={12} /> Tambah {riskType === 'operasional' ? 'Keluaran/Hasil Subkegiatan' : 'IKU Program OPD'}
-                  </button>
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={() => updateData({ ikuProgram: [...(formData.ikuProgram || []), { name: '', target: '' }] })}
+                      className="flex items-center gap-2 text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition-all uppercase tracking-wider"
+                    >
+                      <Plus size={12} /> Tambah {riskType === 'operasional' ? 'Keluaran/Hasil Subkegiatan' : 'IKU Program OPD'}
+                    </button>
+                    <button 
+                      onClick={() => openPasteModal('ikuProgram')}
+                      className="flex items-center gap-2 text-[10px] font-bold text-slate-600 hover:text-slate-700 hover:bg-slate-100 px-2 py-1 rounded transition-all uppercase tracking-wider border border-slate-200"
+                    >
+                      <ClipboardList size={12} /> Paste {riskType === 'operasional' ? 'Keluaran' : 'IKU Program'} (Excel)
+                    </button>
+                  </div>
                 </td>
               </tr>
             )}
@@ -4915,12 +5320,20 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
             }
           </h4>
           {!isReadOnly && (
-            <button 
-              onClick={() => updateData({ assessmentRows: [...(formData.assessmentRows || []), { tujuan: '', sasaran: '', program: '', iku: '' }] })}
-              className="text-[10px] bg-slate-900 text-white px-3 py-1.5 rounded font-black uppercase flex items-center gap-2 hover:bg-slate-800 transition-colors"
-            >
-              <Plus size={12} /> Tambah Baris Penilaian
-            </button>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => openPasteModal('assessment')}
+                className="text-[10px] bg-white text-slate-700 border border-slate-200 px-3 py-1.5 rounded font-bold uppercase flex items-center gap-2 hover:bg-slate-50 transition-colors"
+              >
+                <ClipboardList size={12} /> Paste Assessment (Excel)
+              </button>
+              <button 
+                onClick={() => updateData({ assessmentRows: [...(formData.assessmentRows || []), { tujuan: '', sasaran: '', program: '', iku: '' }] })}
+                className="text-[10px] bg-slate-900 text-white px-3 py-1.5 rounded font-black uppercase flex items-center gap-2 hover:bg-slate-800 transition-colors"
+              >
+                <Plus size={12} /> Tambah Baris
+              </button>
+            </div>
           )}
         </div>
         
@@ -5152,6 +5565,45 @@ function MonitoringCommunicationView({ user, isReadOnly, riskType }: { user: any
     return () => unsubscribe();
   }, [user.uid, user.role]);
 
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pasteData, setPasteData] = useState('');
+
+  const processImport = async () => {
+    if (!pasteData.trim()) return;
+    try {
+      const rawRows = pasteData.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (rawRows.length === 0) return;
+      setLoading(true);
+      setShowPasteModal(false);
+
+      for (const line of rawRows) {
+        const cols = line.split('\t');
+        if (cols.length < 2) continue;
+
+        const [kode, media, prov, recv, pTime, rTime, notes] = cols;
+        const targetRow = rows.find(r => r.risikoKode === kode.trim());
+        if (!targetRow) continue;
+
+        await updateDoc(doc(db, 'risk_identification', targetRow.id), {
+          commMedia: (media || '').trim(),
+          commProvider: (prov || '').trim(),
+          commReceiver: (recv || '').trim(),
+          commPlanTime: (pTime || '').trim(),
+          commRealTime: (rTime || '').trim(),
+          commNotes: (notes || '').trim(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      setPasteData('');
+      alert('Berhasil mengimpor data komunikasi.');
+    } catch (err) {
+      console.error('Import error:', err);
+      alert('Gagal mengimpor data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const updateCommField = async (id: string, field: string, value: string) => {
     try {
       await updateDoc(doc(db, 'risk_identification', id), {
@@ -5168,9 +5620,44 @@ function MonitoringCommunicationView({ user, isReadOnly, riskType }: { user: any
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
           <h4 className="font-bold text-slate-700 uppercase italic">Komunikasi Pengendalian</h4>
+          {!isReadOnly && (
+            <button 
+              onClick={() => setShowPasteModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-all text-[10px] font-bold uppercase tracking-wider"
+            >
+              <ClipboardList size={14} /> Paste Komunikasi dari Excel
+            </button>
+          )}
         </div>
+
+        {showPasteModal && (
+          <div className="fixed inset-0 z-[200] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
+              <div className="p-4 bg-indigo-600 flex items-center justify-between">
+                <div>
+                  <h3 className="text-white font-black text-xs uppercase tracking-widest">Paste Komunikasi dari Excel</h3>
+                  <p className="text-indigo-100 text-[9px] font-bold mt-0.5">Kolom: Kode | Media | Prov | Recv | Plan | Real | Notes</p>
+                </div>
+                <button onClick={() => setShowPasteModal(false)} className="text-white/80 hover:text-white"><X size={18} /></button>
+              </div>
+              <div className="p-6 flex-1">
+                <textarea 
+                  autoFocus
+                  placeholder="Paste di sini..."
+                  className="w-full h-64 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-4 text-[10px] outline-none focus:border-indigo-500 resize-none font-mono"
+                  value={pasteData}
+                  onChange={(e) => setPasteData(e.target.value)}
+                ></textarea>
+              </div>
+              <div className="p-4 bg-slate-50 border-t flex justify-end gap-3">
+                <button onClick={() => setShowPasteModal(false)} className="px-6 py-2 text-slate-500 font-bold text-[10px] uppercase">Batal</button>
+                <button onClick={processImport} disabled={!pasteData.trim()} className="px-8 py-2 bg-indigo-600 text-white font-black text-[10px] uppercase rounded-lg">Impor</button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-[11px] text-left border-collapse">
             <thead className="bg-slate-50 text-slate-500 uppercase text-[9px] font-black border-b border-slate-200">
@@ -5310,6 +5797,44 @@ function MonitoringPlanPIView({ user, isReadOnly, riskType }: { user: any, isRea
     return () => unsubscribe();
   }, [user.uid, user.role]);
 
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pasteData, setPasteData] = useState('');
+
+  const processImport = async () => {
+    if (!pasteData.trim()) return;
+    try {
+      const rawRows = pasteData.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (rawRows.length === 0) return;
+      setLoading(true);
+      setShowPasteModal(false);
+
+      for (const line of rawRows) {
+        const cols = line.split('\t');
+        if (cols.length < 2) continue;
+
+        const [kode, method, pj, pTime, rTime, notes] = cols;
+        const targetRow = rows.find(r => r.risikoKode === kode.trim());
+        if (!targetRow) continue;
+
+        await updateDoc(doc(db, 'risk_identification', targetRow.id), {
+          monMethod: (method || '').trim(),
+          monPJ: (pj || '').trim(),
+          monPlanTime: (pTime || '').trim(),
+          monRealTime: (rTime || '').trim(),
+          monNotes: (notes || '').trim(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      setPasteData('');
+      alert('Berhasil mengimpor data rencana monitoring.');
+    } catch (err) {
+      console.error('Import error:', err);
+      alert('Gagal mengimpor data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const updateMonField = async (id: string, field: string, value: string) => {
     try {
       await updateDoc(doc(db, 'risk_identification', id), {
@@ -5326,9 +5851,44 @@ function MonitoringPlanPIView({ user, isReadOnly, riskType }: { user: any, isRea
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
           <h4 className="font-bold text-slate-700 uppercase italic">RENCANA MONITORING PI</h4>
+          {!isReadOnly && (
+            <button 
+              onClick={() => setShowPasteModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-all text-[10px] font-bold uppercase tracking-wider"
+            >
+              <ClipboardList size={14} /> Paste Monitoring dari Excel
+            </button>
+          )}
         </div>
+
+        {showPasteModal && (
+          <div className="fixed inset-0 z-[200] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
+              <div className="p-4 bg-slate-600 flex items-center justify-between">
+                <div>
+                  <h3 className="text-white font-black text-xs uppercase tracking-widest">Paste Monitoring dari Excel</h3>
+                  <p className="text-slate-100 text-[9px] font-bold mt-0.5">Kolom: Kode | Metode | PJ | Plan | Real | Notes</p>
+                </div>
+                <button onClick={() => setShowPasteModal(false)} className="text-white/80 hover:text-white"><X size={18} /></button>
+              </div>
+              <div className="p-6 flex-1">
+                <textarea 
+                  autoFocus
+                  placeholder="Paste di sini..."
+                  className="w-full h-64 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-4 text-[10px] outline-none focus:border-slate-500 resize-none font-mono"
+                  value={pasteData}
+                  onChange={(e) => setPasteData(e.target.value)}
+                ></textarea>
+              </div>
+              <div className="p-4 bg-slate-50 border-t flex justify-end gap-3">
+                <button onClick={() => setShowPasteModal(false)} className="px-6 py-2 text-slate-500 font-bold text-[10px] uppercase">Batal</button>
+                <button onClick={processImport} disabled={!pasteData.trim()} className="px-8 py-2 bg-slate-600 text-white font-black text-[10px] uppercase rounded-lg">Impor</button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-[11px] text-left border-collapse">
             <thead className="bg-slate-50 text-slate-500 uppercase text-[9px] font-black border-b border-slate-200">
@@ -5454,6 +6014,46 @@ function RiskOccurrenceMonitoringView({ user, isReadOnly, riskType }: { user: an
     return () => unsubscribe();
   }, [user.uid, user.role]);
 
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pasteData, setPasteData] = useState('');
+
+  const processImport = async () => {
+    if (!pasteData.trim()) return;
+    try {
+      const rawRows = pasteData.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (rawRows.length === 0) return;
+      setLoading(true);
+      setShowPasteModal(false);
+
+      for (const line of rawRows) {
+        const cols = line.split('\t');
+        if (cols.length < 2) continue;
+
+        const [kode, date, cause, impact, eNotes, rtpPlan, rtpReal, rtpNotes] = cols;
+        const targetRow = rows.find(r => r.risikoKode === kode.trim());
+        if (!targetRow) continue;
+
+        await updateDoc(doc(db, 'risk_identification', targetRow.id), {
+          eventDate: (date || '').trim(),
+          eventCause: (cause || '').trim(),
+          eventImpact: (impact || '').trim(),
+          eventNotes: (eNotes || '').trim(),
+          rtpPlanDate: (rtpPlan || '').trim(),
+          rtpRealDate: (rtpReal || '').trim(),
+          rtpNotesContent: (rtpNotes || '').trim(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      setPasteData('');
+      alert('Berhasil mengimpor data monitoring keterjadian.');
+    } catch (err) {
+      console.error('Import error:', err);
+      alert('Gagal mengimpor data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const updateField = async (id: string, field: string, value: string) => {
     if (isReadOnly) return;
     try {
@@ -5471,9 +6071,44 @@ function RiskOccurrenceMonitoringView({ user, isReadOnly, riskType }: { user: an
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
           <h4 className="font-bold text-slate-700 uppercase italic text-sm">Monitoring Keterjadian Risiko</h4>
+          {!isReadOnly && (
+            <button 
+              onClick={() => setShowPasteModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-all text-[10px] font-bold uppercase tracking-wider"
+            >
+              <ClipboardList size={14} /> Paste Keterjadian dari Excel
+            </button>
+          )}
         </div>
+
+        {showPasteModal && (
+          <div className="fixed inset-0 z-[200] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
+              <div className="p-4 bg-slate-600 flex items-center justify-between">
+                <div>
+                  <h3 className="text-white font-black text-xs uppercase tracking-widest">Paste Keterjadian dari Excel</h3>
+                  <p className="text-slate-100 text-[9px] font-bold mt-0.5">Kolom: Kode | Uraian | Waktu | Catatan</p>
+                </div>
+                <button onClick={() => setShowPasteModal(false)} className="text-white/80 hover:text-white"><X size={18} /></button>
+              </div>
+              <div className="p-6 flex-1">
+                <textarea 
+                  autoFocus
+                  placeholder="Paste di sini..."
+                  className="w-full h-64 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-4 text-[10px] outline-none focus:border-slate-500 resize-none font-mono"
+                  value={pasteData}
+                  onChange={(e) => setPasteData(e.target.value)}
+                ></textarea>
+              </div>
+              <div className="p-4 bg-slate-50 border-t flex justify-end gap-3">
+                <button onClick={() => setShowPasteModal(false)} className="px-6 py-2 text-slate-500 font-bold text-[10px] uppercase">Batal</button>
+                <button onClick={processImport} disabled={!pasteData.trim()} className="px-8 py-2 bg-slate-600 text-white font-black text-[10px] uppercase rounded-lg">Impor</button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-[10px] text-left border-collapse min-w-[1200px]">
             <thead className="bg-slate-50 text-slate-500 uppercase text-[9px] font-black border-b border-slate-200">
