@@ -1327,23 +1327,6 @@ export default function App() {
   if (user && !selectedRiskType && user.role !== 'Administrator') {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-blue-900/20 via-slate-900 to-slate-900">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="mb-8"
-        >
-          <img 
-            src="https://upload.wikimedia.org/wikipedia/id/8/87/Lambang_Papua_Tengah.png" 
-            alt="Logo ISMAN" 
-            className="w-48 h-auto drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] object-contain"
-            referrerPolicy="no-referrer"
-            onError={(e) => {
-              const target = e.target as HTMLImageElement;
-              target.src = "/logo.png"; // Fallback to local if remote fails
-            }}
-          />
-        </motion.div>
-
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1405,16 +1388,6 @@ export default function App() {
               animate={{ opacity: 1 }}
               className="font-bold text-xl tracking-tight text-white flex items-center gap-2"
             >
-              <img 
-                src="https://upload.wikimedia.org/wikipedia/id/8/87/Lambang_Papua_Tengah.png" 
-                alt="Logo ISMAN" 
-                className="w-10 h-10 object-contain brightness-125"
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  target.src = "/logo.png";
-                }}
-              />
               <div className="flex flex-col">
                 <span className="bg-gradient-to-r from-white to-amber-400 bg-clip-text text-transparent font-black tracking-tighter leading-none">ISMAN</span>
                 <span className="text-[6px] text-slate-500 font-bold tracking-widest leading-none mt-0.5">INTEGRATED RISK MANAGEMENT</span>
@@ -1457,7 +1430,7 @@ export default function App() {
             </div>
             {isSidebarOpen && (
               <div className="overflow-hidden flex-1">
-                <p className="text-sm font-medium text-white truncate">{user.username}</p>
+                <p className="text-sm font-black text-white truncate uppercase tracking-tighter">{user.username}</p>
                 <p className="text-xs text-slate-500 truncate">{user.role}</p>
               </div>
             )}
@@ -2155,7 +2128,7 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
                       </div>
                       <div>
                         <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Nama OPD</div>
-                        <h5 className="font-bold text-slate-800 text-base">{acc.username}</h5>
+                        <h5 className="font-bold text-slate-800 text-base uppercase tracking-tighter">{acc.username}</h5>
                         <span className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-tighter ${
                           acc.role === 'Administrator' ? 'bg-red-100 text-red-600' :
                           acc.role === 'Operator' ? 'bg-purple-100 text-purple-600' :
@@ -2365,24 +2338,6 @@ function LoginPage({ onLogin, accounts }: { onLogin: (userData: any) => void, ac
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-blue-900/20 via-slate-900 to-slate-900">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.5 }}
-        className="mb-8 relative"
-      >
-        <img 
-          src="https://upload.wikimedia.org/wikipedia/id/8/87/Lambang_Papua_Tengah.png" 
-          alt="Logo ISMAN" 
-          className="w-48 h-auto drop-shadow-2xl object-contain transition-transform hover:scale-105 duration-500 brightness-110"
-          referrerPolicy="no-referrer"
-          onError={(e) => {
-            const target = e.target as HTMLImageElement;
-            target.src = "/logo.png";
-          }}
-        />
-      </motion.div>
-
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -2490,25 +2445,24 @@ function AccountManagementView({ accounts }: { accounts: any[] }) {
       return;
     }
 
-    const normalizedUsername = newAcc.username.trim().toLowerCase();
-    console.log('Attempting to create account:', normalizedUsername);
+    const cleanUsername = newAcc.username.trim();
+    
+    if (!cleanUsername || !newAcc.password) {
+      setError('Username dan password wajib diisi');
+      return;
+    }
 
-    // Check if username already exists
-    try {
-      const q = query(collection(db, 'accounts'), where('username', '==', normalizedUsername));
-      const existing = await getDocs(q);
-      if (!existing.empty) {
-        setError('Username sudah digunakan! Gunakan nama lain.');
-        return;
-      }
-    } catch (e) {
-      console.error('Username check error:', e);
+    // Check if username already exists case-insensitively using current accounts prop
+    const isDuplicate = accounts.some(acc => acc.username.toLowerCase() === cleanUsername.toLowerCase());
+    if (isDuplicate) {
+      setError('Username sudah digunakan! Gunakan nama lain.');
+      return;
     }
     
     const newUid = doc(collection(db, 'accounts')).id;
     try {
       const payload = {
-        username: normalizedUsername,
+        username: cleanUsername,
         password: newAcc.password,
         role: newAcc.role,
         createdAt: new Date().toISOString(),
@@ -2558,10 +2512,22 @@ function AccountManagementView({ accounts }: { accounts: any[] }) {
   const saveEdit = async () => {
     if (!editingUid) return;
     try {
-      const normalizedUsername = editForm.username.trim().toLowerCase();
+      const cleanUsername = editForm.username.trim();
+
+      // Duplication check for other accounts
+      const isDuplicate = accounts.some(acc => 
+        acc.uid !== editingUid && 
+        acc.username.toLowerCase() === cleanUsername.toLowerCase()
+      );
+
+      if (isDuplicate) {
+        alert('Username sudah digunakan oleh akun lain!');
+        return;
+      }
+
       await setDoc(doc(db, 'accounts', editingUid), {
         ...editForm,
-        username: normalizedUsername
+        username: cleanUsername
       }, { merge: true });
       setEditingUid(null);
     } catch (error) {
@@ -2652,7 +2618,7 @@ function AccountManagementView({ accounts }: { accounts: any[] }) {
                         <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-[10px]">
                           {acc.username.charAt(0).toUpperCase()}
                         </div>
-                        <span className="font-black text-slate-900">{acc.username}</span>
+                        <span className="font-black text-slate-900 uppercase tracking-tighter">{acc.username}</span>
                       </div>
                     )}
                   </td>
