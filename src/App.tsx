@@ -4208,6 +4208,55 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
 
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteData, setPasteData] = useState('');
+  const [causePasteRowId, setCausePasteRowId] = useState<string | null>(null);
+  const [pasteDataCause, setPasteDataCause] = useState('');
+
+  const processImportCause = async () => {
+    if (!pasteDataCause.trim() || !causePasteRowId) return;
+    try {
+      const rawRows = pasteDataCause.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (rawRows.length === 0) return;
+
+      setLoading(true);
+      const targetRow = rows.find(r => r.id === causePasteRowId);
+      if (!targetRow) {
+        setLoading(false);
+        return;
+      }
+
+      let newSubRows = [...(targetRow.subRows || [])];
+      // If there's only one subrow and it's mostly empty, remove it before appending
+      if (newSubRows.length === 1 && !newSubRows[0].sebabUraian?.trim() && !newSubRows[0].dampakUraian?.trim()) {
+        newSubRows = [];
+      }
+
+      for (const line of rawRows) {
+        const cols = line.split('\t');
+        const [uraian, sumber, control, akibat, pihak] = cols;
+        newSubRows.push({
+          sebabUraian: (uraian || '').trim(),
+          sebabSumber: (sumber || '').trim(),
+          control: (control || '').trim().toUpperCase(),
+          dampakUraian: (akibat || '').trim(),
+          dampakPihak: (pihak || '').trim()
+        });
+      }
+
+      await updateDoc(doc(db, 'risk_identification', causePasteRowId), {
+        subRows: newSubRows,
+        updatedAt: new Date().toISOString()
+      });
+
+      setPasteDataCause('');
+      setCausePasteRowId(null);
+      alert('Berhasil mengimpor sebab/dampak.');
+    } catch (err) {
+      console.error('Import error:', err);
+      alert('Gagal mengimpor data.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleImportFromClipboard = async () => {
     if (isReadOnly) return;
@@ -4607,12 +4656,21 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
                             disabled={isReadOnly}
                           />
                           {!isReadOnly && sIdx === subRows.length - 1 && (
-                            <button 
-                              onClick={() => addSubRow(row.id, subRows)}
-                              className="absolute -bottom-1 right-1 text-[7px] font-black uppercase text-blue-600 bg-blue-50 px-1 py-0.5 rounded shadow-sm opacity-0 group-hover/sub:opacity-100 transition-all hover:bg-blue-100 flex items-center gap-0.5 z-10"
-                            >
-                              <Plus size={8} /> Tambah Sebab
-                            </button>
+                            <div className="absolute -bottom-1 right-1 flex gap-1 opacity-0 group-hover/sub:opacity-100 transition-all z-10">
+                              <button 
+                                onClick={() => setCausePasteRowId(row.id)}
+                                className="text-[7px] font-black uppercase text-slate-600 bg-white border border-slate-200 px-1 py-0.5 rounded shadow-sm hover:bg-slate-50 flex items-center gap-0.5"
+                                title="Paste Multiple Causes from Excel"
+                              >
+                                <ClipboardList size={8} /> Paste
+                              </button>
+                              <button 
+                                onClick={() => addSubRow(row.id, subRows)}
+                                className="text-[7px] font-black uppercase text-blue-600 bg-blue-50 border border-blue-100 px-1 py-0.5 rounded shadow-sm hover:bg-blue-100 flex items-center gap-0.5"
+                              >
+                                <Plus size={8} /> Tambah Sebab
+                              </button>
+                            </div>
                           )}
                           {!isReadOnly && subRows.length > 1 && (
                             <button 
@@ -4781,6 +4839,51 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
                 className="px-8 py-2 bg-blue-600 text-white font-black text-[10px] uppercase tracking-widest hover:bg-blue-700 rounded-lg shadow-lg shadow-blue-500/20 transition-all disabled:opacity-50 disabled:grayscale"
               >
                 Proses Impor
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {causePasteRowId && (
+        <div className="fixed inset-0 z-[200] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200">
+            <div className="p-4 bg-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-white font-black text-xs uppercase tracking-widest">Paste Sebab & Dampak dari Excel</h3>
+                <p className="text-slate-300 text-[9px] font-bold mt-0.5">Copy kolom: Uraian Sebab | Sumber | C/UC | Uraian Akibat | Pihak Terkena</p>
+              </div>
+              <button onClick={() => setCausePasteRowId(null)} className="text-white/80 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-all">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-6 flex-1">
+              <textarea 
+                autoFocus
+                placeholder="Paste kolom Sebab, Sumber, C/UC, Akibat, Pihak di sini..."
+                className="w-full h-64 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-4 text-[10px] font-mono focus:border-slate-500 focus:ring-4 focus:ring-slate-500/5 outline-none transition-all resize-none"
+                value={pasteDataCause}
+                onChange={(e) => setPasteDataCause(e.target.value)}
+              ></textarea>
+              <div className="mt-4 flex items-start gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <div className="text-[9px] text-slate-500 font-bold leading-relaxed italic">
+                  * Baris kosong di Excel akan dilewati. Jika risiko hanya memiliki satu sub-baris kosong, maka akan diganti dengan data paste. Jika sudah ada isinya, akan ditambahkan ke bawah.
+                </div>
+              </div>
+            </div>
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-3">
+              <button 
+                onClick={() => setCausePasteRowId(null)}
+                className="px-6 py-2 text-slate-500 font-bold text-[10px] uppercase tracking-widest hover:bg-slate-200 rounded-lg transition-all"
+              >
+                Batal
+              </button>
+              <button 
+                onClick={processImportCause}
+                disabled={!pasteDataCause.trim()}
+                className="px-8 py-2 bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest hover:bg-black rounded-lg shadow-lg transition-all disabled:opacity-50"
+              >
+                Impor Sebab
               </button>
             </div>
           </div>
