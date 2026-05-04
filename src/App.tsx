@@ -70,8 +70,9 @@ interface FirestoreErrorInfo {
 }
 
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errMessage = error instanceof Error ? error.message : String(error);
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -81,6 +82,11 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   };
+
+  if (errMessage.includes('Quota limit exceeded')) {
+    alert("Kapasitas (Quota) Firebase Gratis harian telah habis. Data tidak dapat disimpan/dibaca sampai reset otomatis besok pagi. Silakan hubungi pengembang jika ini sering terjadi.");
+  }
+
   console.error('Firestore Error Detail: ', JSON.stringify(errInfo, null, 2));
   throw new Error(JSON.stringify(errInfo));
 }
@@ -97,13 +103,14 @@ interface MenuItem {
  * A debounced input component that uses local state to avoid cursor jumps
  * during real-time Firestore updates and supports browser undo/redo.
  */
-function EditableTextarea({ value, onChange, disabled, placeholder, className, rows = 3 }: { 
+function EditableTextarea({ value, onChange, disabled, placeholder, className, rows = 3, autoFocus }: { 
   value: string; 
   onChange: (val: string) => void; 
   disabled?: boolean; 
   placeholder?: string; 
   className?: string;
   rows?: number;
+  autoFocus?: boolean;
 }) {
   const [localValue, setLocalValue] = useState(value);
 
@@ -119,6 +126,7 @@ function EditableTextarea({ value, onChange, disabled, placeholder, className, r
 
   return (
     <textarea
+      autoFocus={autoFocus}
       className={className}
       rows={rows}
       value={localValue}
@@ -195,7 +203,7 @@ const MENU_ITEMS_BASE: MenuItem[] = [
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup, signInAnonymously } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, query, where, doc, getDoc, setDoc, getDocs, deleteDoc, updateDoc, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, query, where, doc, getDoc, setDoc, getDocs, deleteDoc, updateDoc, getDocFromServer, writeBatch } from 'firebase/firestore';
 import { db, auth, googleProvider } from './lib/firebase';
 
 export default function App() {
@@ -270,6 +278,9 @@ export default function App() {
   // Listen to Auth State
   useEffect(() => {
     const initDefaultAdmin = async () => {
+      // Use sessionStorage to only check once per browser session
+      if (sessionStorage.getItem('isman_admin_checked')) return;
+      
       try {
         const q = query(collection(db, 'accounts'), where('username', '==', 'admin'));
         const snapshot = await getDocs(q);
@@ -283,6 +294,7 @@ export default function App() {
             uid: adminId
           });
         }
+        sessionStorage.setItem('isman_admin_checked', 'true');
       } catch (error) {
         console.error("Failed to init admin:", error);
       }
@@ -371,21 +383,26 @@ export default function App() {
   // Migration logic for legacy data
   useEffect(() => {
     if (!user) return;
+    
+    // Use sessionStorage to only run migration check once per browser session per user
+    const migrationSessionKey = `isman_migrated_${user.uid}`;
+    if (sessionStorage.getItem(migrationSessionKey)) return;
 
     const migrateData = async () => {
       try {
+        const batch = writeBatch(db);
+        let hasChanges = false;
+
         const risksRef = collection(db, 'risk_identification');
         const q = query(risksRef, where('createdByUid', '==', user.uid));
         const snapshot = await getDocs(q);
         
-        const updatePromises = snapshot.docs
-          .filter(d => !d.data().riskType)
-          .map(d => updateDoc(d.ref, { riskType: 'strategis' }));
-        
-        if (updatePromises.length > 0) {
-          console.log(`Migrating ${updatePromises.length} risk identification docs for ${user.username}`);
-          await Promise.all(updatePromises);
-        }
+        snapshot.docs.forEach(d => {
+          if (!d.data().riskType) {
+            batch.update(d.ref, { riskType: 'strategis' });
+            hasChanges = true;
+          }
+        });
 
         const otherCollections = ['risk_context', 'monitoring_plan_pi', 'monitoring_communication', 'risk_occurrence_monitoring'];
         for (const col of otherCollections) {
@@ -397,8 +414,8 @@ export default function App() {
                const newSnap = await getDoc(doc(db, col, newId));
                const isShell = newSnap.exists() && (!newSnap.data().informasiLain || newSnap.data().informasiLain === '-');
                if (!newSnap.exists() || isShell) {
-                 await setDoc(doc(db, col, newId), snap.data());
-                 console.log(`Migrated context for ${user.username}`);
+                 batch.set(doc(db, col, newId), snap.data());
+                 hasChanges = true;
                }
              }
              continue;
@@ -407,14 +424,21 @@ export default function App() {
           const colRef = collection(db, col);
           const colQ = query(colRef, where('createdByUid', '==', user.uid));
           const colSnap = await getDocs(colQ);
-          const colPromises = colSnap.docs
-            .filter(d => !d.data().riskType)
-            .map(d => updateDoc(d.ref, { riskType: 'strategis' }));
-          
-          if (colPromises.length > 0) {
-            await Promise.all(colPromises);
-          }
+          colSnap.docs.forEach(d => {
+            if (!d.data().riskType) {
+              batch.update(d.ref, { riskType: 'strategis' });
+              hasChanges = true;
+            }
+          });
         }
+        
+        if (hasChanges) {
+          await batch.commit();
+          console.log(`Executed migration batch for ${user.username}`);
+        }
+        
+        // Mark as migrated for this session
+        sessionStorage.setItem(migrationSessionKey, 'true');
       } catch (err) {
         console.error('Migration error:', err);
       }
@@ -473,6 +497,17 @@ export default function App() {
           for (let r = startR; r < startR + rows; r++) {
             for (let c = 1; c <= cols; c++) {
               const cell = sheet.getCell(r, c);
+              // Avoid styling if the row is effectively empty across the defined columns
+              const row = sheet.getRow(r);
+              let hasValue = false;
+              for(let i=1; i<=cols; i++) {
+                if (row.getCell(i).value !== null && row.getCell(i).value !== undefined && row.getCell(i).value !== '') {
+                  hasValue = true;
+                  break;
+                }
+              }
+              if (!hasValue && r > startR) continue; // Keep header border even if empty, but skip body empty rows
+
               cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
               cell.alignment = { vertical: 'middle', wrapText: true };
             }
@@ -539,16 +574,20 @@ export default function App() {
           if (sasaranList[i]) {
             r.getCell(1).value = i + 1;
             r.getCell(2).value = sasaranList[i];
+            [1, 2].forEach(c => {
+              r.getCell(c).border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+              r.getCell(c).alignment = { vertical: 'middle', wrapText: true };
+            });
           }
           if (ikuSasaranList[i]) {
             r.getCell(3).value = i + 1;
             r.getCell(4).value = ikuSasaranList[i].name;
             r.getCell(5).value = ikuSasaranList[i].target;
+            [3, 4, 5].forEach(c => {
+              r.getCell(c).border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+              r.getCell(c).alignment = { vertical: 'middle', wrapText: true };
+            });
           }
-          [1, 2, 3, 4, 5].forEach(c => {
-            r.getCell(c).border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-            r.getCell(c).alignment = { vertical: 'middle', wrapText: true };
-          });
         }
         curR += maxRow1 + 1;
 
@@ -569,16 +608,20 @@ export default function App() {
           if (programList[i]) {
             r.getCell(1).value = i + 1;
             r.getCell(2).value = programList[i];
+            [1, 2].forEach(c => {
+              r.getCell(c).border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+              r.getCell(c).alignment = { vertical: 'middle', wrapText: true };
+            });
           }
           if (ikuProgramList[i]) {
             r.getCell(3).value = i + 1;
             r.getCell(4).value = ikuProgramList[i].name;
             r.getCell(5).value = ikuProgramList[i].target;
+            [3, 4, 5].forEach(c => {
+              r.getCell(c).border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+              r.getCell(c).alignment = { vertical: 'middle', wrapText: true };
+            });
           }
-          [1, 2, 3, 4, 5].forEach(c => {
-            r.getCell(c).border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-            r.getCell(c).alignment = { vertical: 'middle', wrapText: true };
-          });
         }
         curR += maxRow2 + 1;
 
@@ -640,8 +683,38 @@ export default function App() {
         const ws2Hdr = ['No', 'Tujuan / Sasaran', 'Indikator Kinerja', 'Risiko (Uraian)', 'Risiko (Kode)', 'Pemilik', 'Sebab (Uraian)', 'Sebab (Sumber)', 'Control (C/UC)', 'Dampak (Akibat)', 'Dampak (Pihak)'];
         ws2.getRow(1).values = ws2Hdr;
         styleHdr(ws2, 1, ws2Hdr.length);
-        risks.forEach((r, i) => ws2.addRow([i + 1, r.tujuan, r.indikator, r.risikoUraian, r.risikoKode, r.pemilik, r.sebabUraian, r.sebabSumber, r.control, r.dampakUraian, r.dampakPihak]));
-        styleTbl(ws2, risks.length + 1, ws2Hdr.length); 
+        
+        let ws2RowCount = 1;
+        risks.forEach((r, i) => {
+          const srsRaw = r.subRows || [];
+          const srs = (srsRaw.length > 0 && (srsRaw[0].sebabUraian?.trim() || srsRaw[0].dampakUraian?.trim()))
+            ? srsRaw 
+            : [{
+                sebabUraian: r.sebabUraian || '',
+                sebabSumber: r.sebabSumber || '',
+                control: r.control || '',
+                dampakUraian: r.dampakUraian || '',
+                dampakPihak: r.dampakPihak || ''
+              }];
+          
+          srs.forEach((sub: any) => {
+            ws2.addRow([
+              i + 1, 
+              r.tujuan || '-', 
+              r.indikator || '-', 
+              r.risikoUraian || '-', 
+              r.risikoKode || '-', 
+              r.pemilik || '-', 
+              sub.sebabUraian || '-', 
+              sub.sebabSumber || '-', 
+              sub.control || '-', 
+              sub.dampakUraian || '-', 
+              sub.dampakPihak || '-'
+            ]);
+            ws2RowCount++;
+          });
+        });
+        styleTbl(ws2, ws2RowCount, ws2Hdr.length); 
         ws2.columns = ws2Hdr.map(() => ({ width: 30 }));
         ws2.getColumn(1).width = 5;
 
@@ -848,15 +921,15 @@ export default function App() {
         };
 
         const tS: any = {
-          fontSize: 7.5, cellPadding: 2, valign: 'middle',
-          headStyles: { fillColor: themeColor, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 8 },
-          margin: { top: 25, left: m, right: m, bottom: 20 },
+          fontSize: 7, cellPadding: 1.5, valign: 'middle',
+          headStyles: { fillColor: themeColor, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 7.5 },
+          margin: { top: 20, left: m, right: m, bottom: 15 },
           styles: { textColor: [30, 41, 59], lineColor: [200, 200, 200], lineWidth: 0.1, overflow: 'linebreak' },
           alternateRowStyles: { fillColor: [249, 250, 251] }
         };
 
         hdrPDF('I. PENETAPAN KONTEKS RISIKO');
-        let y = 28;
+        let y = 22;
         const ctxRowsCommon = [
           ['Nama Pemerintah Daerah', `${ctx.namaPemda || '-'}`],
           ['Tahun Penilaian', `${ctx.tahunPenilaian || '-'}`],
@@ -867,25 +940,27 @@ export default function App() {
         ];
 
         ctxRowsCommon.forEach(p => {
-          docPDF.setFontSize(9).setFont('helvetica', 'bold').text(p[0], m, y);
-          docPDF.text(':', m + 57, y);
-          docPDF.setFont('helvetica', 'normal').text(p[1], m + 60, y);
-          y += 6;
+          docPDF.setFontSize(8.5).setFont('helvetica', 'bold').text(p[0], m, y);
+          docPDF.text(':', m + 50, y);
+          docPDF.setFont('helvetica', 'normal').text(p[1], m + 53, y);
+          y += 5;
         });
 
         // Multiline support for Tujuan with aligned wrapping
         const tujuanLabel = riskType === 'operasional' ? 'Tujuan Operasional' : 'Tujuan Strategis';
         const tujuanVal = `${ctx.tujuanStrategis || '-'}`;
         docPDF.setFont('helvetica', 'bold').text(tujuanLabel, m, y);
-        docPDF.text(':', m + 57, y);
-        const splitTujuan = docPDF.splitTextToSize(tujuanVal, pW - m - 60 - m);
-        docPDF.setFont('helvetica', 'normal').text(splitTujuan, m + 60, y);
-        y += (splitTujuan.length * 5) + 4;
+        docPDF.text(':', m + 50, y);
+        const splitTujuan = docPDF.splitTextToSize(tujuanVal, pW - m - 53 - m);
+        docPDF.setFont('helvetica', 'normal').text(splitTujuan, m + 53, y);
+        y += (splitTujuan.length * 4) + 3;
 
         // Group 1: Sasaran (Left) & IKU Sasaran (Right)
-        if (y > pH - 60) { docPDF.addPage(); y = 30; }
-        const colW = (pW - (2 * m) - 5) / 2;
+        if (y > pH - 50) { docPDF.addPage(); y = 25; }
+        const colW = (pW - (2 * m) - 6) / 2; // Increased gutter to 6mm
+        const gutter = 3;
 
+        // Tabel 1 (Sasaran)
         autoTable(docPDF, {
           startY: y,
           ...tS,
@@ -893,25 +968,28 @@ export default function App() {
           tableWidth: colW,
           head: [['NO', riskType === 'operasional' ? 'PROGRAM' : 'SASARAN STRATEGIS']],
           body: (ctx.sasaran || []).map((s: string, i: number) => [i + 1, s]),
-          columnStyles: { 0: { cellWidth: 10, halign: 'center' } }
+          columnStyles: { 0: { cellWidth: 8, halign: 'center' } }
         });
         const finalY1L = (docPDF as any).lastAutoTable.finalY;
 
+        // Tabel 2 (IKU Sasaran)
         autoTable(docPDF, {
           startY: y,
           ...tS,
-          margin: { left: m + colW + 5 },
+          margin: { left: m + colW + 6 },
           tableWidth: colW,
           head: [['NO', riskType === 'operasional' ? 'KEGIATAN UTAMA' : 'IKU SASARAN OPD', 'TARGET']],
           body: (ctx.ikuSasaran || []).map((v: any, i: number) => [i + 1, v.name || '-', v.target || '-']),
-          columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 2: { cellWidth: 20, halign: 'center' } }
+          columnStyles: { 0: { cellWidth: 8, halign: 'center' }, 2: { cellWidth: 15, halign: 'center' } }
         });
         const finalY1R = (docPDF as any).lastAutoTable.finalY;
-        y = Math.max(finalY1L, finalY1R) + 4;
+
+        // Use the maximum Y from the previous row to align the next row of tables to avoid giant gaps and keep it tidy
+        y = Math.max(finalY1L, finalY1R) + gutter;
 
         // Group 2: Program (Left) & IKU Program (Right)
-        if (y > pH - 60) { docPDF.addPage(); y = 30; }
-        
+        if (y > pH - 50) { docPDF.addPage(); y = 25; }
+
         autoTable(docPDF, {
           startY: y,
           ...tS,
@@ -919,38 +997,38 @@ export default function App() {
           tableWidth: colW,
           head: [['NO', riskType === 'operasional' ? 'SUBKEGIATAN UTAMA' : 'PROGRAM STRATEGIS']],
           body: (ctx.program || []).map((p: string, i: number) => [i + 1, p]),
-          columnStyles: { 0: { cellWidth: 10, halign: 'center' } }
+          columnStyles: { 0: { cellWidth: 8, halign: 'center' } }
         });
         const finalY2L = (docPDF as any).lastAutoTable.finalY;
 
         autoTable(docPDF, {
           startY: y,
           ...tS,
-          margin: { left: m + colW + 5 },
+          margin: { left: m + colW + 6 },
           tableWidth: colW,
           head: [['NO', riskType === 'operasional' ? 'KELUARAN / HASIL' : 'IKU PROGRAM OPD', 'TARGET']],
           body: (ctx.ikuProgram || []).map((v: any, i: number) => [i + 1, v.name || '-', v.target || '-']),
-          columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 2: { cellWidth: 20, halign: 'center' } }
+          columnStyles: { 0: { cellWidth: 8, halign: 'center' }, 2: { cellWidth: 15, halign: 'center' } }
         });
         const finalY2R = (docPDF as any).lastAutoTable.finalY;
-        y = Math.max(finalY2L, finalY2R) + 2; 
+        y = Math.max(finalY2L, finalY2R) + 4; 
 
-        if (y > pH - 20) { docPDF.addPage(); y = 20; }
-        docPDF.setFontSize(9).setFont('helvetica', 'bold').text('Informasi Lain', m, y);
-        docPDF.text(':', m + 57, y);
-        const splitInfo = docPDF.splitTextToSize(`${ctx.informasiLain || '-'}`, pW - m - 60 - m);
-        docPDF.setFont('helvetica', 'normal').text(splitInfo, m + 60, y);
-        y += (splitInfo.length * 5) + 3;
+        if (y > pH - 15) { docPDF.addPage(); y = 15; }
+        docPDF.setFontSize(8.5).setFont('helvetica', 'bold').text('Informasi Lain', m, y);
+        docPDF.text(':', m + 50, y);
+        const splitInfo = docPDF.splitTextToSize(`${ctx.informasiLain || '-'}`, pW - m - 53 - m);
+        docPDF.setFont('helvetica', 'normal').text(splitInfo, m + 53, y);
+        y += (splitInfo.length * 4) + 2;
 
         const stText = riskType === 'operasional' 
           ? 'Tujuan, Program, Kegiatan Utama, Subkegiatan Utama yang akan dilakukan penilaian risiko'
           : 'Tujuan, Sasaran, Program Strategis, IKU Program yang akan dilakukan penilaian risiko';
         
-        if (y > pH - 30) { docPDF.addPage(); y = 25; }
-        docPDF.setFontSize(9).setFont('helvetica', 'bold');
+        if (y > pH - 25) { docPDF.addPage(); y = 20; }
+        docPDF.setFontSize(8.5).setFont('helvetica', 'bold');
         const stTextSplit = docPDF.splitTextToSize(stText, pW - m - m);
         docPDF.text(stTextSplit, m, y);
-        y += (stTextSplit.length * 5) + 2;
+        y += (stTextSplit.length * 4) + 2;
 
         const aRows = ctx.assessmentRows || [];
         autoTable(docPDF, {
@@ -964,7 +1042,7 @@ export default function App() {
             riskType === 'operasional' ? 'KELUARAN/HASIL' : 'IKU PROGRAM'
           ]],
           body: aRows.map((r: any, i: number) => [i + 1, r.tujuan, r.sasaran, r.program, r.iku]),
-          columnStyles: { 0: { cellWidth: 10, halign: 'center' } }
+          columnStyles: { 0: { cellWidth: 8, halign: 'center' } }
         });
 
         sigPDF((docPDF as any).lastAutoTable.finalY + 12);
@@ -977,7 +1055,31 @@ export default function App() {
           { 
             t: 'II. IDENTIFIKASI RISIKO', 
             h: [['NO', 'TUJUAN / SASARAN', 'INDIKATOR', 'RISIKO (URAIAN)', 'KODE', 'PEMILIK', 'SEBAB', 'SUMBER', 'C/UC', 'AKIBAT', 'PIHAK']], 
-            b: risks.map((r, i) => [i+1, r.tujuan, r.indikator, r.risikoUraian, r.risikoKode, r.pemilik, r.sebabUraian, r.sebabSumber, r.control, r.dampakUraian, r.dampakPihak]),
+            b: risks.flatMap((r, i) => {
+              const srsRaw = r.subRows || [];
+              const srs = (srsRaw.length > 0 && (srsRaw[0].sebabUraian?.trim() || srsRaw[0].dampakUraian?.trim()))
+                ? srsRaw 
+                : [{ 
+                    sebabUraian: r.sebabUraian || '', 
+                    sebabSumber: r.sebabSumber || '', 
+                    control: r.control || '', 
+                    dampakUraian: r.dampakUraian || '', 
+                    dampakPihak: r.dampakPihak || '' 
+                  }];
+              return srs.map((sub: any) => [
+                i+1, 
+                r.tujuan || '-', 
+                r.indikator || '-', 
+                r.risikoUraian || '-', 
+                r.risikoKode || '-', 
+                r.pemilik || '-', 
+                sub.sebabUraian || '-', 
+                sub.sebabSumber || '-', 
+                sub.control || '-', 
+                sub.dampakUraian || '-', 
+                sub.dampakPihak || '-'
+              ]);
+            }),
             cWidths: { 0: { cellWidth: 8 }, 4: { cellWidth: 15 }, 8: { cellWidth: 12 } }
           },
           { 
@@ -1536,18 +1638,7 @@ export default function App() {
 
             {!isActuallyReadOnly && (
               <>
-                {activeMenu === 2 ? (
-                  <button 
-                    onClick={() => {
-                       const dispatcher = new CustomEvent('add-risk-row');
-                       window.dispatchEvent(dispatcher);
-                    }}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
-                  >
-                    <Plus size={16} />
-                    Tambah Baris Risiko
-                  </button>
-                ) : activeMenu !== 0 && activeMenu !== 8 && activeMenu !== 10 && (
+                {activeMenu === 2 ? null : activeMenu !== 0 && activeMenu !== 8 && activeMenu !== 10 && (
                   <button className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-2">
                     <Plus size={16} />
                     Tambah Data
@@ -1719,6 +1810,233 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
   const [isExporting, setIsExporting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  const handleBulkExcel = async () => {
+    setIsExporting(true);
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const riskType = filterRiskType;
+      const typeLabel = riskType === 'strategis' ? 'STRATEGIS' : 'OPERASIONAL';
+      const themeHex = riskType === 'strategis' ? '1E3A8A' : '059669';
+
+      const styleHdr = (sheet: any, row: number, cols: number) => {
+        for (let c = 1; c <= cols; c++) {
+          const cell = sheet.getCell(row, c);
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: themeHex } };
+          cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        }
+      };
+
+      const styleTbl = (sheet: any, startRow: number, rowCount: number, colCount: number) => {
+        for (let r = startRow; r < startRow + rowCount; r++) {
+          for (let c = 1; c <= colCount; c++) {
+            const cell = sheet.getCell(r, c);
+            cell.border = {
+              top: { style: 'thin' },
+              left: { style: 'thin' },
+              bottom: { style: 'thin' },
+              right: { style: 'thin' }
+            };
+            cell.alignment = { vertical: 'middle', wrapText: true };
+          }
+        }
+      };
+
+      // 1. Ringkasan Sheet
+      const ws1 = workbook.addWorksheet('RINGKASAN');
+      const ws1Hdr = ['NO', 'NAMA OPD', 'TIPE', 'PROGRESS %'];
+      ws1.getRow(1).values = ws1Hdr;
+      styleHdr(ws1, 1, 4);
+      sortedAccounts.forEach((acc, i) => {
+        const s = stats[acc.uid] || { percent: 0 };
+        ws1.addRow([i + 1, acc.username, typeLabel, `${s.percent}%`]);
+      });
+      styleTbl(ws1, 2, sortedAccounts.length, 4);
+      ws1.columns = [{ width: 5 }, { width: 50 }, { width: 15 }, { width: 15 }];
+
+      // 2. Identifikasi Sheet
+      const ws2 = workbook.addWorksheet('IDENTIFIKASI');
+      const ws2Hdr = ['NAMA OPD', 'NO', 'KODE', 'URAIAN RISIKO', 'TUJUAN / SASARAN', 'INDIKATOR', 'PEMILIK', 'SEBAB', 'SUMBER', 'C/UC', 'DAMPAK', 'PIHAK'];
+      ws2.getRow(1).values = ws2Hdr;
+      styleHdr(ws2, 1, ws2Hdr.length);
+      let r2 = 2;
+      sortedAccounts.forEach(acc => {
+        const userRisks = risksState.filter(data => data.createdByUid === acc.uid && (data.riskType || 'strategis') === riskType);
+        userRisks.forEach((risiko, i) => {
+          const srs = (risiko.subRows && risiko.subRows.length > 0) 
+            ? risiko.subRows 
+            : [{ 
+                sebabUraian: risiko.sebabUraian || '', 
+                sebabSumber: risiko.sebabSumber || '', 
+                control: risiko.control || '', 
+                dampakUraian: risiko.dampakUraian || '', 
+                dampakPihak: risiko.dampakPihak || '' 
+              }];
+          srs.forEach((sub: any) => {
+            ws2.addRow([acc.username, i + 1, risiko.risikoKode, risiko.risikoUraian, risiko.tujuan, risiko.indikator, risiko.pemilik, sub.sebabUraian, sub.sebabSumber, sub.control, sub.dampakUraian, sub.dampakPihak]);
+            r2++;
+          });
+        });
+      });
+      styleTbl(ws2, 2, r2 - 2, ws2Hdr.length);
+      ws2.columns = ws2Hdr.map((_, i) => ({ width: i === 0 || i === 3 || i === 4 ? 40 : 15 }));
+
+      // 3. Analisis Sheet
+      const ws3 = workbook.addWorksheet('ANALISIS');
+      const ws3Hdr = ['NAMA OPD', 'NO', 'KODE', 'URAIAN RISIKO', 'RATA DAMPAK', 'RATA KEMUNGKINAN', 'SKOR', 'LEVEL'];
+      ws3.getRow(1).values = ws3Hdr;
+      styleHdr(ws3, 1, ws3Hdr.length);
+      let r3 = 2;
+      sortedAccounts.forEach(acc => {
+        const userRisks = risksState.filter(data => data.createdByUid === acc.uid && (data.riskType || 'strategis') === riskType);
+        userRisks.forEach((risiko, i) => {
+          const dVal = risiko.dampakScores ? risiko.dampakScores.reduce((a: number, b: number) => a + b, 0) / risiko.dampakScores.length : 0;
+          const kVal = risiko.kemungkinanScores ? risiko.kemungkinanScores.reduce((a: number, b: number) => a + b, 0) / risiko.kemungkinanScores.length : 0;
+          const lv = getRiskLevel(dVal, kVal);
+          ws3.addRow([acc.username, i + 1, risiko.risikoKode, risiko.risikoUraian, dVal.toFixed(2), kVal.toFixed(2), (dVal * kVal).toFixed(2), lv.label]);
+          r3++;
+        });
+      });
+      styleTbl(ws3, 2, r3 - 2, ws3Hdr.length);
+      ws3.columns = ws3Hdr.map((_, i) => ({ width: i === 0 || i === 3 ? 40 : 15 }));
+
+      // 4. Residual Sheet
+      const ws4 = workbook.addWorksheet('RESIDUAL & RTP');
+      const ws4Hdr = ['NAMA OPD', 'NO', 'KODE', 'URAIAN RISIKO', 'RESIDUAL D', 'RESIDUAL K', 'RESKORE', 'LEVEL', 'KENDALI', 'GAP', 'AKSI RTP', 'PJ', 'DEADLINE'];
+      ws4.getRow(1).values = ws4Hdr;
+      styleHdr(ws4, 1, ws4Hdr.length);
+      let r4 = 2;
+      sortedAccounts.forEach(acc => {
+        const userRisks = risksState.filter(data => data.createdByUid === acc.uid && (data.riskType || 'strategis') === riskType);
+        userRisks.forEach((risiko, i) => {
+          const rd = parseFloat(risiko.residualDampak || 0);
+          const rk = parseFloat(risiko.residualKemungkinan || 0);
+          const lv = getRiskLevel(rd, rk);
+          ws4.addRow([acc.username, i + 1, risiko.risikoKode, risiko.risikoUraian, rd.toFixed(2), rk.toFixed(2), (rd * rk).toFixed(2), lv.label, risiko.rtpControl, risiko.rtpGap, risiko.rtpAction, risiko.rtpPJ, risiko.rtpDeadline]);
+          r4++;
+        });
+      });
+      styleTbl(ws4, 2, r4 - 2, ws4Hdr.length);
+      ws4.columns = ws4Hdr.map((_, i) => ({ width: i === 0 || i === 3 || i === 10 ? 40 : 15 }));
+
+      saveAs(new Blob([await workbook.xlsx.writeBuffer()]), `MASSAL_DATA_${typeLabel}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    } catch (err: any) {
+      console.error('Bulk Excel error:', err);
+      alert('Gagal Ekspor Massal: ' + err.message);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleBulkPDF = async () => {
+    setIsExporting(true);
+    try {
+      const riskType = filterRiskType;
+      const typeLabel = riskType === 'strategis' ? 'STRATEGIS' : 'OPERASIONAL';
+      const themeColor: [number, number, number] = riskType === 'strategis' ? [30, 58, 138] : [5, 150, 105];
+
+      const doc = new jsPDF('l', 'mm', 'a4');
+      const pW = doc.internal.pageSize.getWidth();
+      
+      doc.setFontSize(16).setFont('helvetica', 'bold');
+      doc.text(`LAPORAN KONSOLIDASI RISIKO ${typeLabel}`, pW / 2, 15, { align: 'center' });
+      doc.setFontSize(8).setFont('helvetica', 'normal');
+      doc.text(`Dicetak pada: ${new Date().toLocaleString('id-ID')}`, pW / 2, 22, { align: 'center' });
+
+      // Summary Table
+      autoTable(doc, {
+        startY: 30,
+        head: [['NO', 'NAMA OPD', 'PROGRESS %', 'JUMLAH RISIKO']],
+        body: sortedAccounts.map((acc, i) => {
+          const s = stats[acc.uid] || { percent: 0, total: 0 };
+          return [i + 1, acc.username, `${s.percent}%`, s.total];
+        }),
+        headStyles: { fillColor: themeColor },
+        styles: { fontSize: 8, halign: 'center' },
+        columnStyles: { 1: { halign: 'left' } }
+      });
+
+      // Consolidated Identification Table
+      doc.addPage();
+      doc.setFontSize(12).text(`KONSOLIDASI IDENTIFIKASI RISIKO - ${typeLabel}`, 15, 15);
+      
+      const body: any[] = [];
+      sortedAccounts.forEach(acc => {
+        const userRisks = risksState.filter(data => data.createdByUid === acc.uid && (data.riskType || 'strategis') === riskType);
+        userRisks.forEach((risiko) => {
+          const srs = (risiko.subRows && risiko.subRows.length > 0) 
+            ? risiko.subRows 
+            : [{ 
+                sebabUraian: risiko.sebabUraian || '', 
+                dampakUraian: risiko.dampakUraian || '' 
+              }];
+
+          srs.forEach((sub: any) => {
+            body.push([
+              acc.username,
+              risiko.risikoKode,
+              risiko.risikoUraian,
+              sub.sebabUraian || '-',
+              sub.dampakUraian || '-'
+            ]);
+          });
+        });
+      });
+
+      autoTable(doc, {
+        startY: 20,
+        head: [['NAMA OPD', 'KODE', 'URAIAN RISIKO', 'SEBAB', 'DAMPAK']],
+        body: body,
+        headStyles: { fillColor: themeColor },
+        styles: { fontSize: 6 },
+        columnStyles: { 
+          0: { cellWidth: 35 }, 
+          1: { cellWidth: 20 },
+          2: { cellWidth: 60 },
+          3: { cellWidth: 70 },
+          4: { cellWidth: 70 }
+        }
+      });
+
+      // Residual Summary Table
+      doc.addPage();
+      doc.setFontSize(12).text(`KONSOLIDASI EVALUASI & RTP - ${typeLabel}`, 15, 15);
+      
+      const resBody: any[] = [];
+      sortedAccounts.forEach(acc => {
+        const userRisks = risksState.filter(data => data.createdByUid === acc.uid && (data.riskType || 'strategis') === riskType);
+        userRisks.forEach((risiko) => {
+          const rd = parseFloat(risiko.residualDampak || 0);
+          const rk = parseFloat(risiko.residualKemungkinan || 0);
+          const lv = getRiskLevel(rd, rk);
+          resBody.push([
+            acc.username,
+            risiko.risikoKode,
+            (rd * rk).toFixed(2),
+            lv.label,
+            risiko.rtpAction || '-'
+          ]);
+        });
+      });
+
+      autoTable(doc, {
+        startY: 20,
+        head: [['NAMA OPD', 'KODE', 'SKOR SISA', 'LEVEL SISA', 'RENCANA TINDAK (RTP)']],
+        body: resBody,
+        headStyles: { fillColor: themeColor },
+        styles: { fontSize: 7 },
+        columnStyles: { 0: { cellWidth: 50 }, 4: { cellWidth: 100 } }
+      });
+
+      doc.save(`MASSAL_LAPORAN_${typeLabel}_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (err: any) {
+      console.error('Bulk PDF error:', err);
+      alert('Gagal Ekspor Massal PDF: ' + err.message);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   useEffect(() => {
     setLoading(true);
     // Listen to accounts
@@ -1833,11 +2151,44 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
           if (!r.risikoUraian?.trim()) m.push('Uraian');
           if (!r.risikoKode?.trim()) m.push('Kode');
           if (!r.pemilik?.trim()) m.push('Pemilik');
-          if (!r.sebabUraian?.trim()) m.push('Sebab');
-          if (!r.sebabSumber?.trim()) m.push('Sumber');
-          if (!r.control?.trim()) m.push('Kendali');
-          if (!r.dampakUraian?.trim()) m.push('Dampak');
-          if (!r.dampakPihak?.trim()) m.push('Pihak');
+          
+          const sRowsRaw = r.subRows || [];
+          // Only use subRows if they actually have content, otherwise fallback to root fields
+          const hasFilledSubRows = sRowsRaw.some((s: any) => 
+            s.sebabUraian?.trim() || 
+            s.sebabSumber?.trim() || 
+            s.control?.trim() || 
+            s.dampakUraian?.trim() || 
+            s.dampakPihak?.trim()
+          );
+          const sRows = hasFilledSubRows ? sRowsRaw : [];
+
+          if (sRows.length === 0) {
+            // Fallback for old data or if somehow missing subRows
+            if (!r.sebabUraian?.trim()) m.push('Sebab');
+            if (!r.sebabSumber?.trim()) m.push('Sumber');
+            if (!r.control?.trim()) m.push('Kendali');
+            if (!r.dampakUraian?.trim()) m.push('Dampak');
+            if (!r.dampakPihak?.trim()) m.push('Pihak');
+          } else {
+            sRows.forEach((sub: any, sIdx: number) => {
+              // Only check subrows that have at least one field partially filled, to avoid nagging about extra empty subrows
+              const isPartiallyFilled = sub.sebabUraian?.trim() || sub.dampakUraian?.trim();
+              if (isPartiallyFilled) {
+                const sm: string[] = [];
+                if (!sub.sebabUraian?.trim()) sm.push('Sebab');
+                if (!sub.sebabSumber?.trim()) sm.push('Sumber');
+                if (!sub.control?.trim()) sm.push('Kendali');
+                if (!sub.dampakUraian?.trim()) sm.push('Dampak');
+                if (!sub.dampakPihak?.trim()) sm.push('Pihak');
+                if (sm.length > 0) {
+                  const suffix = sRows.length > 1 ? ` (B${sIdx + 1})` : '';
+                  sm.forEach(field => m.push(field + suffix));
+                }
+              }
+            });
+          }
+          
           if (m.length > 0) missingIdent.push(`${getRiskName(r, idx)}: ${m.join(', ')}`);
         });
       }
@@ -2129,6 +2480,25 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
           </div>
           
           <div className="flex items-center gap-3">
+            <div className="flex bg-slate-100 p-1 rounded-lg gap-1 border border-slate-200">
+               <button 
+                 onClick={handleBulkExcel}
+                 disabled={isExporting}
+                 className="flex items-center gap-2 px-3 py-1 text-[9px] font-black uppercase tracking-wider text-emerald-700 hover:bg-emerald-50 rounded transition-all disabled:opacity-50"
+                 title="Download Seluruh Data OPD (Excel)"
+               >
+                 <Download size={14} /> MASSAL EXCEL
+               </button>
+               <button 
+                 onClick={handleBulkPDF}
+                 disabled={isExporting}
+                 className="flex items-center gap-2 px-3 py-1 text-[9px] font-black uppercase tracking-wider text-red-700 hover:bg-red-50 rounded transition-all disabled:opacity-50"
+                 title="Download Seluruh Data OPD (PDF)"
+               >
+                 <Download size={14} /> MASSAL PDF
+               </button>
+            </div>
+            
             <div className="flex items-center gap-2 bg-white border border-slate-200 px-3 py-1 rounded-lg">
               <span className="text-[10px] font-bold text-slate-400">SORT:</span>
               <select 
@@ -2913,7 +3283,27 @@ function ScoreTable({
                   <td className="px-3 py-3 text-slate-400 text-center">{idx + 1}</td>
                   <td className="px-3 py-3">
                     <p className="font-bold text-blue-600 mb-0.5">{row.risikoKode || 'RSO.26.XX.YY.ZZ'}</p>
-                    <p className="text-slate-600 whitespace-pre-wrap leading-tight">{row.risikoUraian || '(Uraian belum diisi di Menu 2)'}</p>
+                    <p className="text-slate-600 whitespace-pre-wrap leading-tight mb-2">{row.risikoUraian || '(Uraian belum diisi di Menu 2)'}</p>
+                    
+                    {(() => {
+                      const sRows = row.subRows && row.subRows.length > 0 ? row.subRows : [
+                        { sebabUraian: row.sebabUraian || '', dampakUraian: row.dampakUraian || '' }
+                      ];
+                      
+                      const hasContent = sRows.some((s: any) => s.sebabUraian?.trim() || s.dampakUraian?.trim());
+                      if (!hasContent) return null;
+
+                      return (
+                        <div className="space-y-1 mt-2">
+                          {sRows.map((sub: any, sIdx: number) => (
+                            <div key={sIdx} className="bg-slate-50 p-1.5 rounded text-[8px] border border-slate-100">
+                              <p className="text-slate-500 italic"><span className="font-bold opacity-50">Sebab {sIdx + 1}:</span> {sub.sebabUraian || '-'}</p>
+                              <p className="text-red-700/70"><span className="font-bold opacity-50">Dampak {sIdx + 1}:</span> {sub.dampakUraian || '-'}</p>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </td>
                   {currentParticipants.map((_, sIdx) => {
                     const s = scores[sIdx] || 0;
@@ -3012,6 +3402,9 @@ function RiskAnalysisView({ user, isReadOnly, riskType }: { user: any, isReadOnl
       setLoading(true);
       setShowPasteModal(false);
 
+      const batch = writeBatch(db);
+      let count = 0;
+
       for (const line of rawRows) {
         const cols = line.split('\t');
         if (cols.length < 2) continue;
@@ -3026,22 +3419,27 @@ function RiskAnalysisView({ user, isReadOnly, riskType }: { user: any, isReadOnl
           // Legacy/Total logic: assumes Impact scores followed by Probability scores
           const dScores = parsedScores.slice(0, participantCount);
           const pScores = parsedScores.slice(participantCount, participantCount * 2);
-          await updateDoc(doc(db, 'risk_identification', targetRow.id), {
+          batch.update(doc(db, 'risk_identification', targetRow.id), {
             dampakScores: dScores,
             kemungkinanScores: pScores,
             updatedAt: new Date().toISOString()
           });
         } else {
           const field = pasteType === 'dampak' ? 'dampakScores' : 'kemungkinanScores';
-          await updateDoc(doc(db, 'risk_identification', targetRow.id), {
+          batch.update(doc(db, 'risk_identification', targetRow.id), {
             [field]: parsedScores.slice(0, participantCount),
             updatedAt: new Date().toISOString()
           });
         }
+        count++;
+      }
+
+      if (count > 0) {
+        await batch.commit();
       }
 
       setPasteData('');
-      alert(`Berhasil mengimpor skor ${pasteType === 'total' ? 'analisis' : pasteType}.`);
+      alert(`Berhasil mengimpor ${count} skor ${pasteType === 'total' ? 'analisis' : pasteType}.`);
     } catch (err) {
       console.error('Import error:', err);
       alert('Gagal mengimpor data.');
@@ -3227,16 +3625,26 @@ function RiskAnalysisView({ user, isReadOnly, riskType }: { user: any, isReadOnl
                       <p className="text-blue-600 font-black mb-1 text-[9px]">{row.risikoKode || (riskType === 'operasional' ? 'ROO...' : 'RSO...')}</p>
                       <p className="text-slate-700 font-medium leading-relaxed uppercase text-[10px] mb-2">{row.risikoUraian || '(Uraian belum diisi)'}</p>
                       
-                      {row.subRows && row.subRows.length > 0 && (
-                        <div className="space-y-1">
-                          {row.subRows.map((sub: any, sIdx: number) => (
-                            <div key={sIdx} className="bg-slate-50 p-1.5 rounded text-[8px] border border-slate-100">
-                              <p className="text-slate-500 italic"><span className="font-bold opacity-50">Sebab {sIdx + 1}:</span> {sub.sebabUraian}</p>
-                              <p className="text-red-700/70"><span className="font-bold opacity-50">Dampak {sIdx + 1}:</span> {sub.dampakUraian}</p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      {(() => {
+                        const sRows = row.subRows && row.subRows.length > 0 ? row.subRows : [
+                          { sebabUraian: row.sebabUraian || '', dampakUraian: row.dampakUraian || '' }
+                        ];
+                        
+                        // Only render if there's actual content in at least one field
+                        const hasContent = sRows.some((s: any) => s.sebabUraian?.trim() || s.dampakUraian?.trim());
+                        if (!hasContent) return null;
+
+                        return (
+                          <div className="space-y-1">
+                            {sRows.map((sub: any, sIdx: number) => (
+                              <div key={sIdx} className="bg-slate-50 p-1.5 rounded text-[8px] border border-slate-100">
+                                <p className="text-slate-500 italic"><span className="font-bold opacity-50">Sebab {sIdx + 1}:</span> {sub.sebabUraian || '-'}</p>
+                                <p className="text-red-700/70"><span className="font-bold opacity-50">Dampak {sIdx + 1}:</span> {sub.dampakUraian || '-'}</p>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </td>
                     
                     {/* Dampak Details */}
@@ -3509,18 +3917,28 @@ function RiskResidualView({ user, isReadOnly, riskType }: { user: any, isReadOnl
                       <p className="font-black text-blue-600 text-[9px] mb-1">{row.risikoKode || (riskType === 'operasional' ? 'ROO...' : 'RSO...')}</p>
                       <p className="font-medium text-slate-700 uppercase leading-tight mb-2">{row.risikoUraian || '(Belum diisi)'}</p>
                       
-                      {row.subRows && row.subRows.length > 0 && (
-                        <div className="space-y-1">
-                          {row.subRows.map((sub: any, sIdx: number) => (
-                            <div key={sIdx} className="bg-slate-50 p-1.5 rounded text-[8px] border border-slate-100 italic">
-                               <p className="text-slate-500 font-bold opacity-50 uppercase text-[7px] mb-0.5">Sebab {sIdx + 1}</p>
-                               <p className="text-slate-600 mb-1">{sub.sebabUraian}</p>
-                               <p className="text-red-800 font-bold opacity-30 uppercase text-[7px] mb-0.5">Dampak {sIdx + 1}</p>
-                               <p className="text-red-600">{sub.dampakUraian}</p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      {(() => {
+                        const sRows = row.subRows && row.subRows.length > 0 ? row.subRows : [
+                          { sebabUraian: row.sebabUraian || '', dampakUraian: row.dampakUraian || '' }
+                        ];
+                        
+                        // Only render if there's actual content in at least one field
+                        const hasContent = sRows.some((s: any) => s.sebabUraian?.trim() || s.dampakUraian?.trim());
+                        if (!hasContent) return null;
+
+                        return (
+                          <div className="space-y-1">
+                            {sRows.map((sub: any, sIdx: number) => (
+                              <div key={sIdx} className="bg-slate-50 p-1.5 rounded text-[8px] border border-slate-100 italic">
+                                 <p className="text-slate-500 font-bold opacity-50 uppercase text-[7px] mb-0.5">Sebab {sIdx + 1}</p>
+                                 <p className="text-slate-600 mb-1">{sub.sebabUraian || '-'}</p>
+                                 <p className="text-red-800 font-bold opacity-30 uppercase text-[7px] mb-0.5">Dampak {sIdx + 1}</p>
+                                 <p className="text-red-600">{sub.dampakUraian || '-'}</p>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-2 py-4 text-center border-r border-slate-100 bg-slate-50/20 text-slate-500 italic">
                       {row.avgD?.toFixed(2) || '0.00'}
@@ -3582,21 +4000,21 @@ function RiskResidualView({ user, isReadOnly, riskType }: { user: any, isReadOnl
                       />
                     </td>
                     <td className="px-2 py-4 text-center border-l border-slate-100 bg-slate-50/30">
-                      <input 
-                        type="number" step="0.01" min="0" max="5"
+                      <EditableInput 
+                        type="number" 
                         className={`w-10 text-center border border-slate-200 rounded outline-none font-bold text-blue-600 ${row.rtpControl === 'Tidak Ada' ? 'bg-slate-100 cursor-not-allowed' : 'bg-white'}`}
                         value={row.rtpControl === 'Tidak Ada' ? (row.avgD || 0).toFixed(2) : (row.residualDampak || '')}
                         disabled={isReadOnly || row.rtpControl === 'Tidak Ada'}
-                        onChange={(e) => updateResidualField(row.id, 'residualDampak', e.target.value)}
+                        onChange={(val) => updateResidualField(row.id, 'residualDampak', val)}
                       />
                     </td>
                     <td className="px-2 py-4 text-center border-l border-slate-100 bg-slate-50/30">
-                      <input 
-                        type="number" step="0.01" min="0" max="5"
+                      <EditableInput 
+                        type="number"
                         className={`w-10 text-center border border-slate-200 rounded outline-none font-bold text-blue-600 ${row.rtpControl === 'Tidak Ada' ? 'bg-slate-100 cursor-not-allowed' : 'bg-white'}`}
                         value={row.rtpControl === 'Tidak Ada' ? (row.avgK || 0).toFixed(2) : (row.residualKemungkinan || '')}
                         disabled={isReadOnly || row.rtpControl === 'Tidak Ada'}
-                        onChange={(e) => updateResidualField(row.id, 'residualKemungkinan', e.target.value)}
+                        onChange={(val) => updateResidualField(row.id, 'residualKemungkinan', val)}
                       />
                     </td>
                     <td className="px-2 py-4 text-center border-l border-slate-100 bg-slate-50/50 font-black text-slate-900">
@@ -3684,6 +4102,9 @@ function RiskTreatmentView({ user, isReadOnly, riskType }: { user: any, isReadOn
       setLoading(true);
       setShowPasteModal(false);
 
+      const batch = writeBatch(db);
+      let count = 0;
+
       for (const line of rawRows) {
         const cols = line.split('\t');
         if (cols.length < 2) continue;
@@ -3692,15 +4113,21 @@ function RiskTreatmentView({ user, isReadOnly, riskType }: { user: any, isReadOn
         const targetRow = rows.find(r => r.risikoKode === kode.trim());
         if (!targetRow) continue;
 
-        await updateDoc(doc(db, 'risk_identification', targetRow.id), {
+        batch.update(doc(db, 'risk_identification', targetRow.id), {
           rtpAction: (action || '').trim(),
           rtpPJ: (pj || '').trim(),
           rtpDeadline: (deadline || '').trim(),
           updatedAt: new Date().toISOString()
         });
+        count++;
       }
+      
+      if (count > 0) {
+        await batch.commit();
+      }
+      
       setPasteData('');
-      alert('Berhasil mengimpor data rencana penanganan.');
+      alert(`Berhasil mengimpor ${count} data rencana penanganan.`);
     } catch (err) {
       console.error('Import error:', err);
       alert('Gagal mengimpor data.');
@@ -3816,12 +4243,12 @@ function RiskTreatmentView({ user, isReadOnly, riskType }: { user: any, isReadOn
                     />
                   </td>
                   <td className="px-3 py-4">
-                    <input 
+                    <EditableInput 
                       type="date"
                       className="w-full bg-white border border-slate-200 rounded p-1 outline-none text-[9px] font-bold text-slate-600 appearance-none cursor-pointer"
                       value={row.rtpDeadline || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateTreatmentField(row.id, 'rtpDeadline', e.target.value)}
+                      onChange={(val) => updateTreatmentField(row.id, 'rtpDeadline', val)}
                     />
                   </td>
                 </tr>
@@ -4125,9 +4552,10 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
         // Initialize with one sub-row
         subRows: [
           {
+            id: doc(collection(db, 'temp')).id,
             sebabUraian: '',
-            sebabSumber: '',
-            control: '',
+            sebabSumber: 'Internal',
+            control: 'C',
             dampakUraian: '',
             dampakPihak: ''
           }
@@ -4138,7 +4566,8 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
         createdBy: user?.username || 'Unknown',
         createdByUid: user?.uid || '',
         riskType: riskType, 
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       });
     } catch (error: any) {
       console.error('Error adding document:', error);
@@ -4208,6 +4637,7 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
 
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteData, setPasteData] = useState('');
+  const [groupPasteTarget, setGroupPasteTarget] = useState<{tujuan: string, indikator: string, order: number} | null>(null);
   const [causePasteRowId, setCausePasteRowId] = useState<string | null>(null);
   const [pasteDataCause, setPasteDataCause] = useState('');
 
@@ -4297,16 +4727,18 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
         const cols = line.split('\t');
         if (cols.length < 3) continue;
 
-        const [tujuan, indikator, risikoUraian, pemilik, sebabUraian, sebabSumber, control, dampakUraian, dampakPihak] = cols;
+        const [risikoUraian, pemilik, sebabUraian, sebabSumber, control, dampakUraian, dampakPihak] = cols;
 
         lastSeq++;
         const nextSeq = lastSeq.toString().padStart(2, '0');
         const risikoKode = `${prefix}.26.${baseP1}.${baseP2}.${nextSeq}`;
 
         const newDocRef = doc(collection(db, 'risk_identification'));
+        const currentOrder = groupPasteTarget ? (groupPasteTarget.order + (lastSeq * 0.001)) : (rows.length + lastSeq);
+
         await setDoc(newDocRef, {
-          tujuan: (tujuan || '').trim(),
-          indikator: (indikator || '').trim(),
+          tujuan: groupPasteTarget ? groupPasteTarget.tujuan : '',
+          indikator: groupPasteTarget ? groupPasteTarget.indikator : '',
           risikoUraian: (risikoUraian || '').trim(),
           risikoKode: risikoKode,
           pemilik: (pemilik || '').trim(),
@@ -4318,7 +4750,7 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
             dampakUraian: (dampakUraian || '').trim(),
             dampakPihak: (dampakPihak || '').trim()
           }],
-          order: rows.length + lastSeq,
+          order: currentOrder,
           riskType,
           createdByUid: user.uid,
           username: user.username,
@@ -4328,6 +4760,7 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
       }
 
       setPasteData('');
+      setGroupPasteTarget(null);
       alert(`Berhasil mengimpor data.`);
     } catch (err) {
       console.error('Import error:', err);
@@ -4359,68 +4792,129 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
     }
   };
   const runSync = async () => {
-    if (!contextData || !contextData.assessmentRows) {
-      alert('Data dari Menu 1 belum tersedia atau kosong.');
+    if (isReadOnly) return;
+    
+    if (!contextData || !contextData.assessmentRows || contextData.assessmentRows.length === 0) {
+      alert(`Menu 1 (Konfigurasi Konteks) masih kosong. Pastikan tabel di bagian bawah Menu 1 sudah diisi dengan ${riskType === 'operasional' ? 'Subkegiatan dan Indikator Keluaran' : 'Sasaran Strategis dan IKU'} agar dapat disinkronkan ke Menu 2.`);
       return;
     }
 
-    if (!window.confirm("Apakah anda yakin ingin melakukan sinkronisasi? Baris risiko yang tidak ada di Menu 1 akan dihapus permanen.")) {
+    // Filter valid rows from Menu 1 bottom table
+    const contextPairsList = (contextData.assessmentRows || [])
+        .filter((r: any) => {
+          if (riskType === 'operasional') {
+            return (r.program || '').trim() || (r.iku || '').trim();
+          }
+          return (r.sasaran || '').trim() || (r.iku || '').trim();
+        })
+        .map((r: any) => {
+          const tujuanVal = riskType === 'operasional' ? (r.program || '').trim() : (r.sasaran || '').trim();
+          const ikuVal = (r.iku || '').trim();
+          
+          return {
+            tujuan: tujuanVal,
+            iku: ikuVal,
+            key: `${tujuanVal.toLowerCase()}|${ikuVal.toLowerCase()}`
+          };
+        });
+    
+    if (contextPairsList.length === 0) {
+      alert("Tabel di Menu 1 belum memiliki data yang cukup (Subkegiatan/IKU) untuk disinkronkan.");
       return;
     }
-    
-    // 1. Identify pairs in Menu 1 (Context)
-    const contextPairsList = contextData.assessmentRows
-        .filter((r: any) => (r.tujuan || '').trim() || (r.iku || '').trim())
-        .map((r: any) => ({
-          tujuan: (r.tujuan || '').trim(),
-          iku: (r.iku || '').trim(),
-          key: `${(r.tujuan || '').trim().toLowerCase()}|${(r.iku || '').trim().toLowerCase()}`
-        }));
-        
-    const contextKeysSet = new Set(contextPairsList.map(p => p.key));
 
-    let addedCount = 0;
-    let removedCount = 0;
-
-    // 2. Identify rows in Menu 2 to remove (those that don't exist in Menu 1 anymore)
-    // We only remove rows that have either Tujuan or Indikator (not empty manual rows)
-    const rowsToRemove = rows.filter(row => {
-      const rowKey = `${(row.tujuan || '').trim().toLowerCase()}|${(row.indikator || '').trim().toLowerCase()}`;
-      return (row.tujuan || row.indikator) && !contextKeysSet.has(rowKey);
-    });
-
-    for (const row of rowsToRemove) {
-      try {
-        await deleteDoc(doc(db, 'risk_identification', row.id));
-        removedCount++;
-      } catch (err) {
-        console.error("Failed to delete stale row", err);
-      }
-    }
-    
-    // 3. Add rows from Menu 1 that are missing in Menu 2
-    // Simulate remaining existing keys to avoid duplicates
-    const remainingRows = rows.filter(r => !rowsToRemove.some(rt => rt.id === r.id));
-    const existingKeys = new Set(remainingRows.map(r => `${(r.tujuan || '').trim().toLowerCase()}|${(r.indikator || '').trim().toLowerCase()}`));
-    
-    let currentMaxOrder = rows.length > 0 ? Math.max(...rows.map(r => r.order || 0)) : 0;
-
-    for (const [index, p] of contextPairsList.entries()) {
-      if (!existingKeys.has(p.key)) {
-        await addRow(p.tujuan, p.iku, currentMaxOrder + index + 1);
-        existingKeys.add(p.key); 
-        addedCount++;
-        currentMaxOrder++; 
-      }
+    if (!window.confirm("Apakah Anda yakin ingin melakukan sinkronisasi otomatis?\n\nSinkronisasi akan menambahkan baris baru di Menu 2 berdasarkan data dari Menu 1. Baris yang sudah ada tidak akan dihapus.")) {
+      return;
     }
 
-    if (addedCount > 0 || removedCount > 0) {
-      let msg = 'Sinkronisasi berhasil:';
-      if (addedCount > 0) msg += `\n- Menambah ${addedCount} data baru.`;
-      if (removedCount > 0) msg += `\n- Menghapus ${removedCount} data yang sudah tidak ada di Menu 1.`;
-      alert(msg);
-    } else {
-      alert('Data sudah sinkron dengan Menu 1.');
+    setIsSyncing(true);
+    try {
+      let batch = writeBatch(db);
+      let batchCount = 0;
+      
+      const existingKeys = new Set(rows.map(r => 
+        `${(r.tujuan || '').trim().toLowerCase()}|${(r.indikator || '').trim().toLowerCase()}`
+      ));
+
+      let addedCount = 0;
+      let lastSeq = 0;
+      rows.forEach(r => {
+        const segs = (r.risikoKode || '').split('.');
+        if (segs.length === 5) {
+          const seq = parseInt(segs[4]);
+          if (!isNaN(seq) && seq > lastSeq) lastSeq = seq;
+        }
+      });
+      
+      const currentMaxOrder = rows.length > 0 ? Math.max(...rows.map(r => r.order || 0)) : 0;
+      const prefix = riskType === 'operasional' ? 'ROO' : 'RSO';
+      const year = '26'; // Default for the app's current context
+      
+      let baseP1 = '01';
+      let baseP2 = '01';
+      if (rows.length > 0) {
+        const firstRowParts = (rows[0].risikoKode || '').split('.');
+        if (firstRowParts.length >= 5) {
+          baseP1 = firstRowParts[2] || '01';
+          baseP2 = firstRowParts[3] || '01';
+        }
+      }
+
+      for (const p of contextPairsList) {
+        if (!existingKeys.has(p.key) && p.key !== '|') {
+          const newDocRef = doc(collection(db, 'risk_identification'));
+          addedCount++;
+          const nextSeq = (lastSeq + addedCount).toString().padStart(2, '0');
+          const risikoKode = `${prefix}.${year}.${baseP1}.${baseP2}.${nextSeq}`;
+
+          batch.set(newDocRef, {
+            tujuan: p.tujuan,
+            indikator: p.iku,
+            risikoUraian: '',
+            risikoKode: risikoKode,
+            pemilik: '',
+            subRows: [{
+              sebabUraian: '',
+              sebabSumber: 'Internal',
+              control: 'C',
+              dampakUraian: '',
+              dampakPihak: ''
+            }],
+            dampakScores: [0, 0, 0, 0, 0],
+            kemungkinanScores: [0, 0, 0, 0, 0],
+            order: currentMaxOrder + addedCount,
+            riskType,
+            username: user.username || user.email || 'User',
+            createdBy: user.username || user.email || 'User',
+            createdByUid: user.uid,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
+          
+          existingKeys.add(p.key);
+          batchCount++;
+          if (batchCount >= 400) {
+            await batch.commit();
+            batch = writeBatch(db);
+            batchCount = 0;
+          }
+        }
+      }
+
+      if (batchCount > 0) {
+        await batch.commit();
+      }
+
+      if (addedCount > 0) {
+        alert(`Sinkronisasi berhasil! Menambah ${addedCount} data baru ke Menu 2.`);
+      } else {
+        alert("Semua data dari Menu 1 sudah ada di Menu 2. Tidak ada data baru yang ditambahkan.");
+      }
+    } catch (err) {
+      console.error("Sync Error:", err);
+      alert("Terjadi kesalahan saat sinkronisasi: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -4458,17 +4952,19 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
     // Propagation logic: If first row changes segment 2 or 3 (index 0 or 1), apply to all rows
     if (rows.length > 0 && id === rows[0].id && segmentIndex < 2) {
       try {
-        const batch = rows.map(r => {
+        const batch = writeBatch(db);
+        rows.forEach(r => {
           let rParts = (r.risikoKode || defaultCode).split('.');
           if (rParts.length < 5) rParts = [prefix, '26', '01', '01', '01'];
           rParts[segmentIndex + 2] = normalizedVal;
           const rNewCode = rParts.join('.');
-          return updateDoc(doc(db, 'risk_identification', r.id), { 
+          
+          batch.update(doc(db, 'risk_identification', r.id), { 
             risikoKode: rNewCode,
             updatedAt: new Date().toISOString()
           });
         });
-        await Promise.all(batch);
+        await batch.commit();
       } catch (err) {
         console.error("Propagation error:", err);
       }
@@ -4490,8 +4986,8 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
               <tr>
                 <th className="px-1 py-3 bg-red-50 text-red-600 border-r border-slate-200" rowSpan={2}>Aksi</th>
                 <th className="px-1 py-3 border-r border-slate-200" rowSpan={2}>No</th>
-                <th className="px-2 py-3 border-r border-slate-200 min-w-[150px]" rowSpan={2}>Tujuan/Sasaran {riskType === 'operasional' ? 'Operasional' : 'Strategis'}</th>
-                <th className="px-2 py-3 border-r border-slate-200 min-w-[150px]" rowSpan={2}>Indikator Kinerja</th>
+                <th className="px-2 py-3 border-r border-slate-200 min-w-[150px]" rowSpan={2}>{riskType === 'operasional' ? 'Subkegiatan' : 'Tujuan/Sasaran Strategis'}</th>
+                <th className="px-2 py-3 border-r border-slate-200 min-w-[150px]" rowSpan={2}>{riskType === 'operasional' ? 'Indikator Keluaran' : 'Indikator Kinerja'}</th>
                 <th className="px-2 py-3 border-r border-slate-200" colSpan={2}>Risiko</th>
                 <th className="px-2 py-3 border-r border-slate-200 min-w-[120px]" rowSpan={2}>Pemilik</th>
                 <th className="px-2 py-3 border-r border-slate-200" colSpan={2}>Sebab</th>
@@ -4542,33 +5038,45 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
                               )}
                             </td>
                             <td className="px-2 py-4 border-r border-slate-100 text-center font-bold align-middle" rowSpan={subRows.length}>{idx + 1}</td>
-                            <td className="px-2 py-4 border-r border-slate-100 align-middle" rowSpan={subRows.length}>
+                            <td className="px-2 py-4 border-r border-slate-100 align-middle bg-slate-50/30" rowSpan={subRows.length}>
                               <div className="flex flex-col gap-2">
                                 <EditableTextarea 
-                                  className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
+                                  className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500 cursor-not-allowed" 
                                   rows={3} 
                                   value={row.tujuan} 
                                   onChange={val => updateField(row.id, 'tujuan', val)}
-                                  disabled={isReadOnly}
+                                  disabled={true}
                                 />
                                 {!isReadOnly && (
-                                  <button 
-                                    type="button"
-                                    onClick={() => addRow(row.tujuan, row.indikator, (row.order || 0) + 0.001)}
-                                    className="opacity-0 group-hover:opacity-100 self-start text-[8px] font-black uppercase bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 transition-all flex items-center gap-1 shadow-sm border border-blue-100"
-                                  >
-                                    <Plus size={8} /> Tambah Risiko
-                                  </button>
+                                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                                    <button 
+                                      type="button"
+                                      onClick={() => addRow(row.tujuan, row.indikator, (row.order || 0) + 0.001)}
+                                      className="self-start text-[8px] font-black uppercase bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 transition-all flex items-center gap-1 shadow-sm border border-blue-100"
+                                    >
+                                      <Plus size={8} /> Tambah Risiko
+                                    </button>
+                                    <button 
+                                      type="button"
+                                      onClick={() => {
+                                        setGroupPasteTarget({ tujuan: row.tujuan, indikator: row.indikator, order: row.order || 0 });
+                                        setShowPasteModal(true);
+                                      }}
+                                      className="self-start text-[8px] font-black uppercase bg-slate-50 text-slate-600 px-2 py-1 rounded hover:bg-slate-100 transition-all flex items-center gap-1 shadow-sm border border-slate-200"
+                                    >
+                                      <ClipboardList size={8} /> Paste Risiko
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             </td>
-                            <td className="px-2 py-4 border-r border-slate-100 align-middle" rowSpan={subRows.length}>
+                            <td className="px-2 py-4 border-r border-slate-100 align-middle bg-slate-50/30" rowSpan={subRows.length}>
                               <EditableTextarea 
-                                className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500" 
+                                className="w-full bg-transparent p-0 outline-none resize-none disabled:text-slate-500 cursor-not-allowed" 
                                 rows={3} 
                                 value={row.indikator} 
                                 onChange={val => updateField(row.id, 'indikator', val)}
-                                disabled={isReadOnly}
+                                disabled={true}
                               />
                             </td>
                             <td className="px-2 py-4 border-r border-slate-100 align-middle" rowSpan={subRows.length}>
@@ -4733,24 +5241,18 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
         <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
            {!isReadOnly && (
              <div className="flex gap-4">
-               <button 
-                 onClick={() => addRow()}
-                 className="text-[10px] text-blue-600 font-bold hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 uppercase tracking-widest border border-blue-100"
-               >
-                 <Plus size={14} /> Tambah Baris Kosong
-               </button>
+               {/* Sync button remains */}
                <button 
                  onClick={runSync}
-                 className="text-[10px] text-emerald-600 font-bold hover:bg-emerald-50 px-4 py-2 rounded-lg flex items-center gap-2 uppercase tracking-widest border border-emerald-100"
+                 disabled={isSyncing}
+                 className={`text-[10px] font-bold px-4 py-2 rounded-lg flex items-center gap-2 uppercase tracking-widest border transition-all ${isSyncing ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'text-emerald-600 hover:bg-emerald-50 border-emerald-100'}`}
                >
-                 <RotateCw size={14} /> Sinkronisasi dari Menu 1
-               </button>
-               <button 
-                 onClick={handleImportFromClipboard}
-                 className="text-[10px] text-slate-700 font-bold hover:bg-slate-100 px-4 py-2 rounded-lg flex items-center gap-2 uppercase tracking-widest border border-slate-200"
-                 title="Panduan: Copy 9 kolom di Excel: Tujuan, Indikator, Risiko, Pemilik, Sebab, Sumber, C/UC, Akibat, Pihak."
-               >
-                 <ClipboardList size={14} /> Paste dari Excel
+                 {isSyncing ? (
+                   <RotateCw size={14} className="animate-spin" />
+                 ) : (
+                   <RotateCw size={14} />
+                 )}
+                 {isSyncing ? 'Sinkronisasi...' : 'Sinkronisasi dari Menu 1'}
                </button>
              </div>
            )}
@@ -4802,21 +5304,34 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200">
             <div className="p-4 bg-blue-600 flex items-center justify-between">
               <div>
-                <h3 className="text-white font-black text-xs uppercase tracking-widest">Paste Data dari Excel</h3>
-                <p className="text-blue-100 text-[9px] font-bold mt-0.5">Copy baris di Excel (Tujuan, Indikator, Risiko, Pemilik, Sebab, Sumber, C/UC, Akibat, Pihak)</p>
+                <h3 className="text-white font-black text-xs uppercase tracking-widest">Paste Data Risiko dari Excel</h3>
+                <p className="text-blue-100 text-[9px] font-bold mt-0.5">
+                  {groupPasteTarget 
+                    ? `Menambah risiko untuk: ${groupPasteTarget.tujuan.substring(0, 50)}...` 
+                    : 'Copy baris di Excel (Risiko, Pemilik, Sebab, Sumber, C/UC, Akibat, Pihak)'}
+                </p>
+                <p className="text-blue-200 text-[8px] font-medium mt-1 uppercase tracking-wider">
+                  Kolom: Risiko | Pemilik | Sebab | Sumber | C/UC | Akibat | Pihak
+                </p>
               </div>
-              <button onClick={() => setShowPasteModal(false)} className="text-white/80 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-all">
+              <button 
+                onClick={() => {
+                  setShowPasteModal(false);
+                  setGroupPasteTarget(null);
+                }} 
+                className="text-white/80 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-all"
+              >
                 <X size={18} />
               </button>
             </div>
             <div className="p-6 flex-1 overflow-y-auto">
-              <textarea 
+              <EditableTextarea 
                 autoFocus
                 placeholder="Tekan Ctrl + V di sini untuk menempelkan data dari Excel..."
                 className="w-full h-64 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-4 text-[10px] font-mono focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 outline-none transition-all resize-none"
                 value={pasteData}
-                onChange={(e) => setPasteData(e.target.value)}
-              ></textarea>
+                onChange={(val) => setPasteData(val)}
+              />
               <div className="mt-4 flex items-start gap-3 bg-blue-50 p-3 rounded-lg border border-blue-100">
                 <div className="bg-blue-100 p-1.5 rounded-md text-blue-600">
                   <ShieldAlert size={14} />
@@ -4828,7 +5343,10 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
             </div>
             <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-3">
               <button 
-                onClick={() => setShowPasteModal(false)}
+                onClick={() => {
+                  setShowPasteModal(false);
+                  setGroupPasteTarget(null);
+                }}
                 className="px-6 py-2 text-slate-500 font-bold text-[10px] uppercase tracking-widest hover:bg-slate-200 rounded-lg transition-all"
               >
                 Batal
@@ -4858,13 +5376,13 @@ function RiskIdentificationView({ user, isReadOnly, riskType }: { user: any, isR
               </button>
             </div>
             <div className="p-6 flex-1">
-              <textarea 
+              <EditableTextarea 
                 autoFocus
                 placeholder="Paste kolom Sebab, Sumber, C/UC, Akibat, Pihak di sini..."
                 className="w-full h-64 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-4 text-[10px] font-mono focus:border-slate-500 focus:ring-4 focus:ring-slate-500/5 outline-none transition-all resize-none"
                 value={pasteDataCause}
-                onChange={(e) => setPasteDataCause(e.target.value)}
-              ></textarea>
+                onChange={(val) => setPasteDataCause(val)}
+              />
               <div className="mt-4 flex items-start gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200">
                 <div className="text-[9px] text-slate-500 font-bold leading-relaxed italic">
                   * Baris kosong di Excel akan dilewati. Jika risiko hanya memiliki satu sub-baris kosong, maka akan diganti dengan data paste. Jika sudah ada isinya, akan ditambahkan ke bawah.
@@ -5157,21 +5675,22 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
                 <td className="px-4 py-2 border-r border-slate-200 text-center">{idx + 1}</td>
                 <td className="px-4 py-2" colSpan={2}>
                   <div className="flex gap-2 items-start">
-                    <textarea 
+                    <EditableTextarea 
                       className="w-full bg-transparent outline-none resize-none disabled:text-slate-500" 
                       rows={2} 
                       value={s} 
                       disabled={isReadOnly}
-                      onChange={(e) => {
+                      onChange={(val) => {
                         const next = [...formData.sasaran];
-                        next[idx] = e.target.value;
+                        next[idx] = val;
                         updateData({ sasaran: next });
                       }}
                     />
                     {!isReadOnly && (
                       <button 
                         onClick={() => {
-                          if (window.confirm("Hapus sasaran ini?")) {
+                          const label = riskType === 'operasional' ? "program" : "sasaran strategis";
+                          if (window.confirm(`Hapus ${label} ini?`)) {
                             const next = formData.sasaran.filter((_: any, i: number) => i !== idx);
                             updateData({ sasaran: next });
                           }
@@ -5207,41 +5726,27 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
             )}
           </tbody>
 
-          <TableHeader title={riskType === 'operasional' ? 'Kegiatan Utama' : 'IKU Sasaran OPD'} rightLabel="2026" />
+          <TableHeader title={riskType === 'operasional' ? 'Kegiatan Utama' : 'IKU Sasaran OPD'} rightLabel={riskType === 'operasional' ? '' : '2026'} />
           <tbody>
             {(formData.ikuSasaran || []).map((i: any, idx: number) => (
               <tr key={idx} className="border-b border-slate-200 last:border-0 group">
                 <td className="px-4 py-2 border-r border-slate-200 text-center">{idx + 1}</td>
-                <td className="px-4 py-2">
+                <td className="px-4 py-2" colSpan={riskType === 'operasional' ? 2 : 1}>
                   <div className="flex gap-2 items-center">
-                    <input 
+                    <EditableInput 
                       className="w-full bg-transparent outline-none disabled:text-slate-500" 
                       value={i.name} 
                       disabled={isReadOnly}
-                      onChange={(e) => {
+                      onChange={(val) => {
                         const next = [...formData.ikuSasaran];
-                        next[idx] = { ...next[idx], name: e.target.value };
+                        next[idx] = { ...next[idx], name: val };
                         updateData({ ikuSasaran: next });
                       }}
                     />
-                  </div>
-                </td>
-                <td className="px-4 py-2 text-center border-l border-slate-200 font-bold">
-                  <div className="flex gap-2 items-center">
-                    <input 
-                      className="w-full text-center bg-transparent outline-none disabled:text-slate-500" 
-                      value={i.target} 
-                      disabled={isReadOnly}
-                      onChange={(e) => {
-                        const next = [...formData.ikuSasaran];
-                        next[idx] = { ...next[idx], target: e.target.value };
-                        updateData({ ikuSasaran: next });
-                      }}
-                    />
-                    {!isReadOnly && (
+                    {riskType === 'operasional' && !isReadOnly && (
                       <button 
                         onClick={() => {
-                          if (window.confirm("Hapus IKU ini?")) {
+                          if (window.confirm(`Hapus kegiatan utama ini?`)) {
                             const next = formData.ikuSasaran.filter((_: any, i: number) => i !== idx);
                             updateData({ ikuSasaran: next });
                           }
@@ -5253,6 +5758,35 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
                     )}
                   </div>
                 </td>
+                {riskType !== 'operasional' && (
+                  <td className="px-4 py-2 text-center border-l border-slate-200 font-bold">
+                    <div className="flex gap-2 items-center">
+                      <EditableInput 
+                        className="w-full text-center bg-transparent outline-none disabled:text-slate-500" 
+                        value={i.target} 
+                        disabled={isReadOnly}
+                        onChange={(val) => {
+                          const next = [...formData.ikuSasaran];
+                          next[idx] = { ...next[idx], target: val };
+                          updateData({ ikuSasaran: next });
+                        }}
+                      />
+                      {!isReadOnly && (
+                        <button 
+                          onClick={() => {
+                            if (window.confirm(`Hapus IKU sasaran ini?`)) {
+                              const next = formData.ikuSasaran.filter((_: any, i: number) => i !== idx);
+                              updateData({ ikuSasaran: next });
+                            }
+                          }}
+                          className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all p-1"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                )}
               </tr>
             ))}
             {!isReadOnly && (
@@ -5277,27 +5811,28 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
             )}
           </tbody>
 
-          <TableHeader title={riskType === 'operasional' ? 'Subkegiatan Utama' : 'Program Strategis'} />
+          <TableHeader title={riskType === 'operasional' ? 'Subkegiatan' : 'Program Strategis'} />
           <tbody>
             {(formData.program || []).map((p: string, idx: number) => (
               <tr key={idx} className="border-b border-slate-200 last:border-0 group">
                 <td className="px-4 py-2 border-r border-slate-200 text-center">{idx + 1}</td>
                 <td className="px-4 py-2" colSpan={2}>
                   <div className="flex gap-2 items-center">
-                    <input 
+                    <EditableInput 
                       className="w-full bg-transparent outline-none disabled:text-slate-500" 
                       value={p} 
                       disabled={isReadOnly}
-                      onChange={(e) => {
+                      onChange={(val) => {
                         const next = [...formData.program];
-                        next[idx] = e.target.value;
+                        next[idx] = val;
                         updateData({ program: next });
                       }}
                     />
                     {!isReadOnly && (
                       <button 
                         onClick={() => {
-                          if (window.confirm("Hapus program ini?")) {
+                          const label = riskType === 'operasional' ? "subkegiatan" : "program strategis";
+                          if (window.confirm(`Hapus ${label} ini?`)) {
                             const next = formData.program.filter((_: any, i: number) => i !== idx);
                             updateData({ program: next });
                           }
@@ -5319,7 +5854,7 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
                       onClick={() => updateData({ program: [...(formData.program || []), ''] })}
                       className="flex items-center gap-2 text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition-all uppercase tracking-wider"
                     >
-                      <Plus size={12} /> Tambah {riskType === 'operasional' ? 'Subkegiatan Utama' : 'Program Strategis'}
+                      <Plus size={12} /> Tambah {riskType === 'operasional' ? 'Subkegiatan' : 'Program Strategis'}
                     </button>
                     <button 
                       onClick={() => openPasteModal('program')}
@@ -5333,41 +5868,42 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
             )}
           </tbody>
 
-          <TableHeader title={riskType === 'operasional' ? 'Keluaran/Hasil Subkegiatan' : 'IKU Program OPD'} rightLabel="2026" />
+          <TableHeader title={riskType === 'operasional' ? 'Indikator Keluaran' : 'IKU Program OPD'} rightLabel="2026" />
           <tbody>
             {(formData.ikuProgram || []).map((i: any, idx: number) => (
               <tr key={idx} className="border-b border-slate-200 last:border-0 h-8 group">
                 <td className="px-4 py-2 border-r border-slate-200 text-center">{idx + 1}</td>
                 <td className="px-4 py-2">
-                  <input 
+                  <EditableInput 
                     className="w-full bg-transparent outline-none disabled:text-slate-500" 
                     placeholder="..." 
                     value={i.name || ''}
                     disabled={isReadOnly}
-                    onChange={(e) => {
+                    onChange={(val) => {
                       const next = [...(formData.ikuProgram || [])];
-                      next[idx] = { ...next[idx], name: e.target.value };
+                      next[idx] = { ...next[idx], name: val };
                       updateData({ ikuProgram: next });
                     }}
                   />
                 </td>
                 <td className="px-4 py-2 border-l border-slate-200">
                   <div className="flex gap-2 items-center">
-                    <input 
+                    <EditableInput 
                       className="w-full text-center bg-transparent outline-none disabled:text-slate-500" 
                       placeholder="..." 
                       value={i.target || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => {
+                      onChange={(val) => {
                         const next = [...(formData.ikuProgram || [])];
-                        next[idx] = { ...next[idx], target: e.target.value };
+                        next[idx] = { ...next[idx], target: val };
                         updateData({ ikuProgram: next });
                       }}
                     />
                     {!isReadOnly && (
                       <button 
                         onClick={() => {
-                          if (window.confirm("Hapus IKU Program ini?")) {
+                          const label = riskType === 'operasional' ? "indikator keluaran" : "IKU program";
+                          if (window.confirm(`Hapus ${label} ini?`)) {
                             const next = (formData.ikuProgram || []).filter((_: any, i: number) => i !== idx);
                             updateData({ ikuProgram: next });
                           }
@@ -5389,13 +5925,13 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
                       onClick={() => updateData({ ikuProgram: [...(formData.ikuProgram || []), { name: '', target: '' }] })}
                       className="flex items-center gap-2 text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition-all uppercase tracking-wider"
                     >
-                      <Plus size={12} /> Tambah {riskType === 'operasional' ? 'Keluaran/Hasil Subkegiatan' : 'IKU Program OPD'}
+                      <Plus size={12} /> Tambah {riskType === 'operasional' ? 'Indikator Keluaran' : 'IKU Program OPD'}
                     </button>
                     <button 
                       onClick={() => openPasteModal('ikuProgram')}
                       className="flex items-center gap-2 text-[10px] font-bold text-slate-600 hover:text-slate-700 hover:bg-slate-100 px-2 py-1 rounded transition-all uppercase tracking-wider border border-slate-200"
                     >
-                      <ClipboardList size={12} /> Paste {riskType === 'operasional' ? 'Keluaran' : 'IKU Program'} (Excel)
+                      <ClipboardList size={12} /> Paste {riskType === 'operasional' ? 'Indikator Keluaran' : 'IKU Program'} (Excel)
                     </button>
                   </div>
                 </td>
@@ -5409,7 +5945,7 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
         <div className="font-bold">Informasi lain</div>
         <div className="col-span-2 flex gap-2">
           <span>:</span> 
-          <input name="informasiLain" value={formData.informasiLain} onChange={handleChange} disabled={isReadOnly} className="border-b border-dotted border-slate-400 flex-1 outline-none disabled:border-transparent disabled:text-slate-500" />
+          <EditableInput value={formData.informasiLain} onChange={val => updateData({ informasiLain: val })} disabled={isReadOnly} className="border-b border-dotted border-slate-400 flex-1 outline-none disabled:border-transparent disabled:text-slate-500" />
         </div>
       </div>
 
@@ -5418,7 +5954,7 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
         <div className="flex justify-between items-end">
           <h4 className="font-black text-[10px] uppercase tracking-widest text-slate-500 bg-slate-50 p-2 border-l-4 border-slate-900">
             {riskType === 'operasional' 
-              ? 'Tujuan, Program, Kegiatan Utama, Subkegiatan Utama yang akan dilakukan penilaian risiko'
+              ? 'Program, Kegiatan, Subkegiatan, dan Keluaran/Hasil Subkegiatan yang akan dilakukan penilaian risiko'
               : 'Tujuan, Sasaran, Program Strategis, IKU Program yang akan dilakukan penilaian risiko'
             }
           </h4>
@@ -5442,12 +5978,12 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
         
         <div className="border border-slate-900 overflow-hidden shadow-lg">
           <table className="w-full text-[10px] text-left border-collapse">
-            <thead className="bg-slate-900 text-white uppercase font-bold tracking-wider">
+            <thead className="bg-slate-900 text-white uppercase font-bold tracking-wider text-[9px]">
               <tr className="divide-x divide-slate-800 text-center">
                 <th className="px-2 py-3 w-10">No</th>
-                <th className="px-4 py-3 w-32">{riskType === 'operasional' ? 'Tujuan Operasional' : 'Tujuan Strategis'}</th>
-                <th className="px-4 py-3 w-48">{riskType === 'operasional' ? 'Program' : 'Sasaran Strategis'}</th>
-                <th className="px-4 py-3 w-48">{riskType === 'operasional' ? 'Subkegiatan Utama' : 'Program Strategis'}</th>
+                <th className="px-4 py-3 w-32">{riskType === 'operasional' ? 'Program' : 'Tujuan Strategis'}</th>
+                <th className="px-4 py-3 w-48">{riskType === 'operasional' ? 'Kegiatan' : 'Sasaran Strategis'}</th>
+                <th className="px-4 py-3 w-48">{riskType === 'operasional' ? 'Subkegiatan' : 'Program Strategis'}</th>
                 <th className="px-4 py-3">{riskType === 'operasional' ? 'Keluaran/Hasil Subkegiatan' : 'IKU Program'}</th>
                 <th className={`px-2 py-3 w-12 bg-red-900 ${isReadOnly ? 'hidden' : ''}`}>Aksi</th>
               </tr>
@@ -5467,8 +6003,14 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
                         updateData({ assessmentRows: next });
                       }}
                     >
-                      <option value="">- {riskType === 'operasional' ? 'Pilih Tujuan' : 'Pilih Tujuan'} -</option>
-                      <option value={formData.tujuanStrategis}>{formData.tujuanStrategis}</option>
+                      <option value="">- {riskType === 'operasional' ? 'Pilih Program' : 'Pilih Tujuan Strategis'} -</option>
+                      {riskType === 'operasional' ? (
+                        (formData.sasaran || []).map((s: string, sIdx: number) => (
+                          <option key={sIdx} value={s}>{s}</option>
+                        ))
+                      ) : (
+                        <option value={formData.tujuanStrategis}>{formData.tujuanStrategis}</option>
+                      )}
                     </select>
                   </td>
                   <td className="px-2 py-4">
@@ -5482,10 +6024,16 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
                         updateData({ assessmentRows: next });
                       }}
                     >
-                      <option value="">- {riskType === 'operasional' ? 'Pilih Program' : 'Pilih Sasaran'} -</option>
-                      {(formData.sasaran || []).map((s: string, sIdx: number) => (
-                        <option key={sIdx} value={s}>{s}</option>
-                      ))}
+                      <option value="">- {riskType === 'operasional' ? 'Pilih Kegiatan' : 'Pilih Sasaran Strategis'} -</option>
+                      {riskType === 'operasional' ? (
+                        (formData.ikuSasaran || []).map((i: any, iIdx: number) => (
+                          <option key={iIdx} value={i.name}>{i.name}</option>
+                        ))
+                      ) : (
+                        (formData.sasaran || []).map((s: string, sIdx: number) => (
+                          <option key={sIdx} value={s}>{s}</option>
+                        ))
+                      )}
                     </select>
                   </td>
                   <td className="px-2 py-4 bg-slate-50/50">
@@ -5499,7 +6047,7 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
                         updateData({ assessmentRows: next });
                       }}
                     >
-                      <option value="">- {riskType === 'operasional' ? 'Pilih Subkegiatan' : 'Pilih Program'} -</option>
+                      <option value="">- {riskType === 'operasional' ? 'Pilih Subkegiatan' : 'Pilih Program Strategis'} -</option>
                       {(formData.program || []).map((p: string, pIdx: number) => (
                         <option key={pIdx} value={p}>{p}</option>
                       ))}
@@ -5516,7 +6064,7 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
                         updateData({ assessmentRows: next });
                       }}
                     >
-                      <option value="">- {riskType === 'operasional' ? 'Pilih Hasil' : 'Pilih IKU'} -</option>
+                      <option value="">- {riskType === 'operasional' ? 'Pilih Keluaran/Hasil Subkegiatan' : 'Pilih IKU Program'} -</option>
                       {(formData.ikuProgram || []).map((i: any, iIdx: number) => (
                         <option key={iIdx} value={i.name}>{i.name}</option>
                       ))}
@@ -5547,36 +6095,32 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
       <div className="mt-16 flex justify-end">
         <div className="w-72 text-center space-y-0.5">
           <p className="mb-20">
-            <input 
-              name="ttdTempat" 
+            <EditableInput 
               value={formData.ttdTempat} 
-              onChange={handleChange} 
+              onChange={val => updateData({ ttdTempat: val })} 
               disabled={isReadOnly}
               className="w-24 border-b border-slate-200 text-center outline-none bg-transparent hover:bg-slate-50 transition-colors placeholder:text-slate-300 disabled:border-transparent" 
               placeholder="Tempat..." 
             />, 
-            <input 
-              name="ttdBulan" 
+            <EditableInput 
               value={formData.ttdBulan} 
-              onChange={handleChange} 
+              onChange={val => updateData({ ttdBulan: val })} 
               disabled={isReadOnly}
               className="w-32 border-b border-slate-200 text-center outline-none bg-transparent hover:bg-slate-50 transition-colors ml-1 placeholder:text-slate-300 disabled:border-transparent" 
               placeholder="Bulan Tahun..." 
             />
             <br />
-            <input 
-              name="ttdJabatan" 
+            <EditableInput 
               value={formData.ttdJabatan} 
-              onChange={handleChange} 
+              onChange={val => updateData({ ttdJabatan: val })} 
               disabled={isReadOnly}
               className="w-full mt-2 font-bold outline-none text-center bg-transparent hover:bg-slate-50 transition-colors placeholder:text-slate-300" 
               placeholder="Jabatan Penandatangan..."
             />
             <br />
-            <input 
-              name="ttdKabupaten" 
+            <EditableInput 
               value={formData.ttdKabupaten || 'Kabupaten Paniai'} 
-              onChange={handleChange} 
+              onChange={val => updateData({ ttdKabupaten: val })} 
               disabled={isReadOnly}
               className="w-full text-center outline-none bg-transparent hover:bg-blue-50 border-b border-transparent focus:border-blue-200 transition-all font-semibold italic text-slate-600 placeholder:text-slate-300 disabled:border-transparent" 
               placeholder="Kabupaten..." 
@@ -5584,30 +6128,27 @@ function ContextSettingView({ user, isReadOnly, riskType }: { user: any, isReadO
           </p>
           <div className="space-y-1">
             <p className="font-bold underline decoration-2 h-6">
-              <input 
-                name="ttdNama" 
+              <EditableInput 
                 value={formData.ttdNama} 
-                onChange={handleChange} 
+                onChange={val => updateData({ ttdNama: val })} 
                 disabled={isReadOnly}
                 className="w-full text-center bg-transparent outline-none placeholder:text-slate-300" 
                 placeholder="NAMA LENGKAP"
               />
             </p>
             <p className="text-[10px]">
-              <input 
-                name="ttdPangkat" 
+              <EditableInput 
                 value={formData.ttdPangkat} 
-                onChange={handleChange} 
+                onChange={val => updateData({ ttdPangkat: val })} 
                 disabled={isReadOnly}
                 className="w-full text-center bg-transparent outline-none placeholder:text-slate-200" 
                 placeholder="Pangkat/Golongan"
               />
             </p>
             <p className="font-mono text-[9px] text-slate-500">
-              NIP. <input 
-                name="ttdNip" 
+              NIP. <EditableInput 
                 value={formData.ttdNip} 
-                onChange={handleChange} 
+                onChange={val => updateData({ ttdNip: val })} 
                 disabled={isReadOnly}
                 className="w-32 bg-transparent outline-none placeholder:text-slate-300 text-left" 
                 placeholder="19xxxxxxxxxxxxxx"
@@ -5679,6 +6220,9 @@ function MonitoringCommunicationView({ user, isReadOnly, riskType }: { user: any
       setLoading(true);
       setShowPasteModal(false);
 
+      const batch = writeBatch(db);
+      let count = 0;
+
       for (const line of rawRows) {
         const cols = line.split('\t');
         if (cols.length < 2) continue;
@@ -5687,7 +6231,7 @@ function MonitoringCommunicationView({ user, isReadOnly, riskType }: { user: any
         const targetRow = rows.find(r => r.risikoKode === kode.trim());
         if (!targetRow) continue;
 
-        await updateDoc(doc(db, 'risk_identification', targetRow.id), {
+        batch.update(doc(db, 'risk_identification', targetRow.id), {
           commMedia: (media || '').trim(),
           commProvider: (prov || '').trim(),
           commReceiver: (recv || '').trim(),
@@ -5696,9 +6240,15 @@ function MonitoringCommunicationView({ user, isReadOnly, riskType }: { user: any
           commNotes: (notes || '').trim(),
           updatedAt: new Date().toISOString()
         });
+        count++;
       }
+
+      if (count > 0) {
+        await batch.commit();
+      }
+
       setPasteData('');
-      alert('Berhasil mengimpor data komunikasi.');
+      alert(`Berhasil mengimpor ${count} data komunikasi.`);
     } catch (err) {
       console.error('Import error:', err);
       alert('Gagal mengimpor data.');
@@ -5811,12 +6361,12 @@ function MonitoringCommunicationView({ user, isReadOnly, riskType }: { user: any
                     />
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200">
-                    <input 
+                    <EditableInput 
                       type="date"
                       className="w-full bg-transparent outline-none font-bold text-slate-600 cursor-pointer disabled:opacity-50 text-[9px]"
                       value={row.commPlanTime || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateCommField(row.id, 'commPlanTime', e.target.value)}
+                      onChange={(val) => updateCommField(row.id, 'commPlanTime', val)}
                     />
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200">
@@ -5911,6 +6461,9 @@ function MonitoringPlanPIView({ user, isReadOnly, riskType }: { user: any, isRea
       setLoading(true);
       setShowPasteModal(false);
 
+      const batch = writeBatch(db);
+      let count = 0;
+
       for (const line of rawRows) {
         const cols = line.split('\t');
         if (cols.length < 2) continue;
@@ -5919,7 +6472,7 @@ function MonitoringPlanPIView({ user, isReadOnly, riskType }: { user: any, isRea
         const targetRow = rows.find(r => r.risikoKode === kode.trim());
         if (!targetRow) continue;
 
-        await updateDoc(doc(db, 'risk_identification', targetRow.id), {
+        batch.update(doc(db, 'risk_identification', targetRow.id), {
           monMethod: (method || '').trim(),
           monPJ: (pj || '').trim(),
           monPlanTime: (pTime || '').trim(),
@@ -5927,9 +6480,15 @@ function MonitoringPlanPIView({ user, isReadOnly, riskType }: { user: any, isRea
           monNotes: (notes || '').trim(),
           updatedAt: new Date().toISOString()
         });
+        count++;
       }
+
+      if (count > 0) {
+        await batch.commit();
+      }
+
       setPasteData('');
-      alert('Berhasil mengimpor data rencana monitoring.');
+      alert(`Berhasil mengimpor ${count} data rencana monitoring.`);
     } catch (err) {
       console.error('Import error:', err);
       alert('Gagal mengimpor data.');
@@ -6013,13 +6572,13 @@ function MonitoringPlanPIView({ user, isReadOnly, riskType }: { user: any, isRea
                     <p className="font-medium text-slate-700 leading-relaxed italic">{row.rtpAction || '(RTP belum diisi di Menu 5)'}</p>
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200">
-                    <textarea 
+                    <EditableTextarea 
                       className="w-full bg-transparent outline-none resize-none disabled:text-slate-500" 
                       rows={2}
                       placeholder="Input metode..."
                       value={row.monMethod || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateMonField(row.id, 'monMethod', e.target.value)}
+                      onChange={(val) => updateMonField(row.id, 'monMethod', val)}
                     />
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200">
@@ -6032,21 +6591,21 @@ function MonitoringPlanPIView({ user, isReadOnly, riskType }: { user: any, isRea
                     />
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200">
-                    <input 
+                    <EditableInput 
                       type="date"
                       className="w-full bg-transparent outline-none font-bold text-slate-600 cursor-pointer disabled:opacity-50"
                       value={row.monPlanTime || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateMonField(row.id, 'monPlanTime', e.target.value)}
+                      onChange={(val) => updateMonField(row.id, 'monPlanTime', val)}
                     />
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200">
-                    <input 
+                    <EditableInput 
                       type="date"
                       className="w-full bg-transparent outline-none font-bold text-slate-600 cursor-pointer disabled:opacity-50"
                       value={row.monRealTime || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateMonField(row.id, 'monRealTime', e.target.value)}
+                      onChange={(val) => updateMonField(row.id, 'monRealTime', val)}
                     />
                   </td>
                   <td className="px-3 py-4">
@@ -6128,6 +6687,9 @@ function RiskOccurrenceMonitoringView({ user, isReadOnly, riskType }: { user: an
       setLoading(true);
       setShowPasteModal(false);
 
+      const batch = writeBatch(db);
+      let count = 0;
+
       for (const line of rawRows) {
         const cols = line.split('\t');
         if (cols.length < 2) continue;
@@ -6136,7 +6698,7 @@ function RiskOccurrenceMonitoringView({ user, isReadOnly, riskType }: { user: an
         const targetRow = rows.find(r => r.risikoKode === kode.trim());
         if (!targetRow) continue;
 
-        await updateDoc(doc(db, 'risk_identification', targetRow.id), {
+        batch.update(doc(db, 'risk_identification', targetRow.id), {
           eventDate: (date || '').trim(),
           eventCause: (cause || '').trim(),
           eventImpact: (impact || '').trim(),
@@ -6146,9 +6708,15 @@ function RiskOccurrenceMonitoringView({ user, isReadOnly, riskType }: { user: an
           rtpNotesContent: (rtpNotes || '').trim(),
           updatedAt: new Date().toISOString()
         });
+        count++;
       }
+
+      if (count > 0) {
+        await batch.commit();
+      }
+
       setPasteData('');
-      alert('Berhasil mengimpor data monitoring keterjadian.');
+      alert(`Berhasil mengimpor ${count} data monitoring keterjadian.`);
     } catch (err) {
       console.error('Import error:', err);
       alert('Gagal mengimpor data.');
@@ -6237,19 +6805,38 @@ function RiskOccurrenceMonitoringView({ user, isReadOnly, riskType }: { user: an
                 <tr key={row.id} className="hover:bg-slate-50 transition-colors align-top">
                   <td className="px-3 py-4 font-bold text-slate-400 border-r border-slate-200 text-center">{idx + 1}</td>
                   <td className="px-3 py-4 border-r border-slate-200 font-medium text-slate-700 italic leading-relaxed">
-                    {row.risikoUraian || '(Belum diisi)'}
+                    <p className="mb-2">{row.risikoUraian || '(Belum diisi)'}</p>
+                    {(() => {
+                      const sRows = row.subRows && row.subRows.length > 0 ? row.subRows : [
+                        { sebabUraian: row.sebabUraian || '', dampakUraian: row.dampakUraian || '' }
+                      ];
+                      
+                      const hasContent = sRows.some((s: any) => s.sebabUraian?.trim() || s.dampakUraian?.trim());
+                      if (!hasContent) return null;
+
+                      return (
+                        <div className="space-y-1 mt-1 not-italic">
+                          {sRows.map((sub: any, sIdx: number) => (
+                            <div key={sIdx} className="bg-slate-50 p-1 rounded text-[7px] border border-slate-100">
+                              <p className="text-slate-400"><span className="font-bold opacity-70">Identified Sebab:</span> {sub.sebabUraian || '-'}</p>
+                              <p className="text-red-600/50"><span className="font-bold opacity-70">Identified Dampak:</span> {sub.dampakUraian || '-'}</p>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-3 py-4 border-r border-slate-200 font-black text-blue-600">
                     {row.risikoKode || '-'}
                   </td>
                   {/* Kejadian Risiko - Tanggal */}
                   <td className="px-2 py-4 border-r border-slate-200">
-                    <input 
+                    <EditableInput 
                       type="date"
                       className="w-full bg-transparent outline-none cursor-pointer font-bold text-slate-600 disabled:opacity-50"
                       value={row.eventDate || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateField(row.id, 'eventDate', e.target.value)}
+                      onChange={(val) => updateField(row.id, 'eventDate', val)}
                     />
                   </td>
                   {/* Kejadian Risiko - Sebab */}
@@ -6291,33 +6878,33 @@ function RiskOccurrenceMonitoringView({ user, isReadOnly, riskType }: { user: an
                   </td>
                   {/* Rencana Pelaksanaan RTP */}
                   <td className="px-2 py-4 border-r border-slate-200">
-                    <input 
+                    <EditableInput 
                       type="date"
                       className="w-full bg-transparent outline-none cursor-pointer font-bold text-slate-600 disabled:opacity-50"
                       value={row.rtpPlanDate || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateField(row.id, 'rtpPlanDate', e.target.value)}
+                      onChange={(val) => updateField(row.id, 'rtpPlanDate', val)}
                     />
                   </td>
                   {/* Realisasi Pelaksanaan RTP */}
                   <td className="px-2 py-4 border-r border-slate-200">
-                    <input 
+                    <EditableInput 
                       type="date"
                       className="w-full bg-transparent outline-none cursor-pointer font-bold text-slate-600 disabled:opacity-50"
                       value={row.rtpRealDate || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateField(row.id, 'rtpRealDate', e.target.value)}
+                      onChange={(val) => updateField(row.id, 'rtpRealDate', val)}
                     />
                   </td>
                   {/* Keterangan (RTP) */}
                   <td className="px-2 py-4">
-                    <textarea 
+                    <EditableTextarea 
                       className="w-full bg-transparent outline-none resize-none disabled:text-slate-500"
                       rows={2}
                       placeholder="..."
                       value={row.rtpNotesContent || ''}
                       disabled={isReadOnly}
-                      onChange={(e) => updateField(row.id, 'rtpNotesContent', e.target.value)}
+                      onChange={(val) => updateField(row.id, 'rtpNotesContent', val)}
                     />
                   </td>
                 </tr>
