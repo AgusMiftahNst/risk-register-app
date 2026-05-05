@@ -475,11 +475,11 @@ export default function App() {
       const occurrences = occurrencesSnap.docs.filter(filterByType).map(d => d.data());
       
       const risks = risksRaw.map((r: any) => {
-        const dS = r.dampakScores || [];
-        const kS = r.kemungkinanScores || [];
-        const pC = ctx.participantCount || 5;
-        const avgD = dS.slice(0, pC).length > 0 ? dS.slice(0, pC).reduce((a: number, b: number) => a + b, 0) / dS.slice(0, pC).length : 0;
-        const avgK = kS.slice(0, pC).length > 0 ? kS.slice(0, pC).reduce((a: number, b: number) => a + b, 0) / kS.slice(0, pC).length : 0;
+        const dS = (r.dampakScores || []).slice(0, ctx.participantCount || 5).filter((v: number) => v > 0);
+        const kS = (r.kemungkinanScores || []).slice(0, ctx.participantCount || 5).filter((v: number) => v > 0);
+        
+        const avgD = dS.length > 0 ? parseFloat((dS.reduce((a: number, b: number) => a + b, 0) / dS.length).toFixed(2)) : 0;
+        const avgK = kS.length > 0 ? parseFloat((kS.reduce((a: number, b: number) => a + b, 0) / kS.length).toFixed(2)) : 0;
         const riskLevel = getRiskLevel(avgD, avgK);
         return { 
           ...r, avgD, avgK, score: avgD * avgK, riskLevel,
@@ -2104,8 +2104,10 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
       const getScoreAndLevel = (d: any, type: 'init' | 'res') => {
         let dVal = 0, kVal = 0;
         if (type === 'init') {
-          dVal = d.dampakScores ? d.dampakScores.reduce((a: number, b: number) => a + b, 0) / d.dampakScores.length : 0;
-          kVal = d.kemungkinanScores ? d.kemungkinanScores.reduce((a: number, b: number) => a + b, 0) / d.kemungkinanScores.length : 0;
+          const activeD = (d.dampakScores || []).filter((v: number) => v > 0);
+          const activeK = (d.kemungkinanScores || []).filter((v: number) => v > 0);
+          dVal = activeD.length > 0 ? parseFloat((activeD.reduce((a: number, b: number) => a + b, 0) / activeD.length).toFixed(2)) : 0;
+          kVal = activeK.length > 0 ? parseFloat((activeK.reduce((a: number, b: number) => a + b, 0) / activeK.length).toFixed(2)) : 0;
         } else {
           dVal = parseFloat(d.residualDampak || 0);
           kVal = parseFloat(d.residualKemungkinan || 0);
@@ -3224,8 +3226,8 @@ function ScoreTable({
 }) {
   const calculateAvg = (scores?: number[]) => {
     if (!scores || scores.length === 0) return '0.00';
-    // Only average the scores for the current participant count
-    const activeScores = scores.slice(0, participantCount);
+    // Only average the scores for the current participant count that are non-zero (active voters)
+    const activeScores = scores.slice(0, participantCount).filter(v => v > 0);
     if (activeScores.length === 0) return '0.00';
     return (activeScores.reduce((a, b) => a + b, 0) / activeScores.length).toFixed(2);
   };
@@ -3620,8 +3622,11 @@ function RiskAnalysisView({ user, isReadOnly, riskType }: { user: any, isReadOnl
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((row, idx) => {
-                const activeD = (row.dampakScores || []).slice(0, participantCount);
-                const activeK = (row.kemungkinanScores || []).slice(0, participantCount);
+                const dScores = (row.dampakScores || []).slice(0, participantCount);
+                const kScores = (row.kemungkinanScores || []).slice(0, participantCount);
+                
+                const activeD = dScores.filter((v: any) => v > 0);
+                const activeK = kScores.filter((v: any) => v > 0);
                 
                 const avgDampak = activeD.length > 0 ? parseFloat((activeD.reduce((a: any, b: any) => a + b, 0) / activeD.length).toFixed(2)) : 0;
                 const avgKemungkinan = activeK.length > 0 ? parseFloat((activeK.reduce((a: any, b: any) => a + b, 0) / activeK.length).toFixed(2)) : 0;
@@ -3661,7 +3666,7 @@ function RiskAnalysisView({ user, isReadOnly, riskType }: { user: any, isReadOnl
                     {/* Dampak Details */}
                     {Array.from({ length: participantCount }).map((_, i) => (
                       <td key={`dv-${i}`} className="px-1 py-6 text-center border-l border-slate-100 text-slate-500 font-mono text-[10px]">
-                        {activeD[i] || 0}
+                        {dScores[i] || 0}
                       </td>
                     ))}
                     <td className="px-2 py-6 text-center bg-slate-50 font-bold border-l border-slate-200 text-blue-600">{avgDampak.toFixed(2)}</td>
@@ -3669,7 +3674,7 @@ function RiskAnalysisView({ user, isReadOnly, riskType }: { user: any, isReadOnl
                     {/* Kemungkinan Details */}
                     {Array.from({ length: participantCount }).map((_, i) => (
                       <td key={`kv-${i}`} className="px-1 py-6 text-center border-l border-slate-100 text-slate-500 font-mono text-[10px]">
-                        {activeK[i] || 0}
+                        {kScores[i] || 0}
                       </td>
                     ))}
                     <td className="px-2 py-6 text-center bg-slate-50 font-bold border-l border-slate-200 text-blue-600">{avgKemungkinan.toFixed(2)}</td>
@@ -3766,11 +3771,11 @@ function RiskResidualView({ user, isReadOnly, riskType }: { user: any, isReadOnl
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => {
         const d = doc.data();
-        const activeD = (d.dampakScores || []).slice(0, participantCount);
-        const activeK = (d.kemungkinanScores || []).slice(0, participantCount);
-        const avgD = activeD.length > 0 ? activeD.reduce((a: any, b: any) => a + b, 0) / activeD.length : 0;
-        const avgK = activeK.length > 0 ? activeK.reduce((a: any, b: any) => a + b, 0) / activeK.length : 0;
-        const initScore = avgD * avgK;
+        const activeD = (d.dampakScores || []).slice(0, participantCount).filter((v: any) => v > 0);
+        const activeK = (d.kemungkinanScores || []).slice(0, participantCount).filter((v: any) => v > 0);
+        const avgD = activeD.length > 0 ? (activeD.reduce((a: any, b: any) => a + b, 0) / activeD.length) : 0;
+        const avgK = activeK.length > 0 ? (activeK.reduce((a: any, b: any) => a + b, 0) / activeK.length) : 0;
+        const initScore = parseFloat(avgD.toFixed(2)) * parseFloat(avgK.toFixed(2));
         const initRisk = getRiskLevel(avgD, avgK);
 
         return { 
