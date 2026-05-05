@@ -1720,7 +1720,7 @@ export default function App() {
               ) : activeMenu === 9 ? (
                 <RiskOccurrenceMonitoringView user={viewingUser!} isReadOnly={isActuallyReadOnly} riskType={selectedRiskType || 'strategis'} />
               ) : activeMenu === 10 ? (
-                <FinalDocumentView user={viewingUser!} isAdmin={user!.role === 'Administrator'} isOperator={user!.role === 'Operator'} />
+                <FinalDocumentView user={viewingUser!} isAdmin={user!.role === 'Administrator'} isOperator={user!.role === 'Operator'} riskType={selectedRiskType || 'strategis'} />
               ) : activeMenu === 11 ? (
                 <AccountManagementView accounts={accounts} />
               ) : (
@@ -7042,7 +7042,7 @@ function RiskOccurrenceMonitoringView({ user, isReadOnly, riskType }: { user: an
   );
 }
 
-function FinalDocumentView({ user, isAdmin, isOperator }: { user: any, isAdmin: boolean, isOperator: boolean }) {
+function FinalDocumentView({ user, isAdmin, isOperator, riskType }: { user: any, isAdmin: boolean, isOperator: boolean, riskType: 'strategis' | 'operasional' }) {
   const [docLink, setDocLink] = useState('');
   const [masterLink, setMasterLink] = useState('');
   const [opdLinks, setOpdLinks] = useState<Record<string, { driveLink: string; uploadLink: string }>>({});
@@ -7483,6 +7483,15 @@ function FinalDocumentView({ user, isAdmin, isOperator }: { user: any, isAdmin: 
             <p className="text-slate-500 max-w-lg mx-auto leading-relaxed text-sm">
               Pastikan Anda telah mengunggah semua dokumen laporan final yang telah ditandatangani ke folder Google Drive yang disediakan di bawah ini.
             </p>
+            <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl inline-block mt-4">
+              <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1 text-left">💡 Aturan Penamaan Dokumen:</p>
+              <p className="text-xs font-bold text-blue-700 text-left">
+                {riskType === 'operasional' ? 'ROO' : 'RSO'}_{user?.username || 'NAMA DINAS'}_2026
+              </p>
+              <p className="text-[9px] text-blue-500 mt-1 text-left italic">
+                *Pastikan nama file sesuai sebelum diunggah ke folder Drive.
+              </p>
+            </div>
           </div>
 
           <div className="max-w-2xl mx-auto pt-4">
