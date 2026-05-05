@@ -557,10 +557,10 @@ export default function App() {
         });
 
         let curR = 12;
-        // Group 1: Sasaran (Left) & IKU Sasaran (Right)
+        // Group 1: Program/Sasaran (Left) & Kegiatan Utama/IKU Sasaran (Right)
         const row1SubHdr = ws1.getRow(curR);
         row1SubHdr.getCell(1).value = 'No'; row1SubHdr.getCell(2).value = riskType === 'operasional' ? 'Program' : 'Sasaran Strategis';
-        row1SubHdr.getCell(3).value = 'No'; row1SubHdr.getCell(4).value = riskType === 'operasional' ? 'Kegiatan Utama' : 'IKU Sasaran OPD'; row1SubHdr.getCell(5).value = 'Target';
+        row1SubHdr.getCell(3).value = 'No'; row1SubHdr.getCell(4).value = riskType === 'operasional' ? 'Kegiatan Utama' : 'IKU Sasaran OPD'; row1SubHdr.getCell(5).value = riskType === 'operasional' ? '' : 'Target';
         [1, 2].forEach(c => styleHdr(ws1, curR, c));
         [3, 4, 5].forEach(c => styleHdr(ws1, curR, c));
         curR += 1;
@@ -591,10 +591,11 @@ export default function App() {
         }
         curR += maxRow1 + 1;
 
-        // Group 2: Program (Left) & IKU Program (Right)
+        // Group 2: Subkegiatan/Program (Left) & Indikator Keluaran/IKU Program (Right)
         const row2SubHdr = ws1.getRow(curR);
-        row2SubHdr.getCell(1).value = 'No'; row2SubHdr.getCell(2).value = riskType === 'operasional' ? 'Subkegiatan Utama' : 'Program Strategis';
-        row2SubHdr.getCell(3).value = 'No'; row2SubHdr.getCell(4).value = riskType === 'operasional' ? 'Keluaran / Hasil Subkegiatan' : 'IKU Program OPD'; row2SubHdr.getCell(5).value = 'Target';
+        row2SubHdr.getCell(1).value = 'No'; row2SubHdr.getCell(2).value = riskType === 'operasional' ? 'Subkegiatan' : 'Program Strategis';
+        row2SubHdr.getCell(3).value = 'No'; row2SubHdr.getCell(4).value = riskType === 'operasional' ? 'Indikator Keluaran' : 'IKU Program OPD'; 
+        if (riskType !== 'operasional') row2SubHdr.getCell(5).value = 'Target';
         [1, 2].forEach(c => styleHdr(ws1, curR, c));
         [3, 4, 5].forEach(c => styleHdr(ws1, curR, c));
         curR += 1;
@@ -616,14 +617,15 @@ export default function App() {
           if (ikuProgramList[i]) {
             r.getCell(3).value = i + 1;
             r.getCell(4).value = ikuProgramList[i].name;
-            r.getCell(5).value = ikuProgramList[i].target;
+            if (riskType !== 'operasional') r.getCell(5).value = ikuProgramList[i].target;
             [3, 4, 5].forEach(c => {
+              if (riskType === 'operasional' && c === 5) return;
               r.getCell(c).border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
               r.getCell(c).alignment = { vertical: 'middle', wrapText: true };
             });
           }
         }
-        curR += maxRow2 + 1;
+        curR += maxRow2;
 
         // Informasi Lain
         ws1.getRow(curR).getCell(1).value = 'Informasi Lain';
@@ -638,7 +640,7 @@ export default function App() {
         ws1.mergeCells(`A${curR}:E${curR}`);
         const subTitleCell = ws1.getCell(`A${curR}`);
         subTitleCell.value = riskType === 'operasional' 
-          ? 'Tujuan, Program, Kegiatan Utama, Subkegiatan Utama yang akan dilakukan penilaian risiko'
+          ? 'Program, Kegiatan, Subkegiatan, dan Keluaran/Hasil Subkegiatan yang akan dilakukan penilaian risiko'
           : 'Tujuan, Sasaran, Program Strategis, IKU Program yang akan dilakukan penilaian risiko';
         subTitleCell.font = { bold: true };
         subTitleCell.alignment = { horizontal: 'left' };
@@ -648,9 +650,9 @@ export default function App() {
         const aHeader = ws1.getRow(curR);
         const aCols = [
           'No', 
-          riskType === 'operasional' ? 'Tujuan Operasional' : 'Tujuan Strategis', 
-          riskType === 'operasional' ? 'Program' : 'Sasaran Strategis', 
-          riskType === 'operasional' ? 'Subkegiatan Utama' : 'Program Strategis', 
+          riskType === 'operasional' ? 'Program' : 'Tujuan Strategis', 
+          riskType === 'operasional' ? 'Kegiatan' : 'Sasaran Strategis', 
+          riskType === 'operasional' ? 'Subkegiatan' : 'Program Strategis', 
           riskType === 'operasional' ? 'Keluaran/Hasil Subkegiatan' : 'IKU Program'
         ];
         aCols.forEach((col, i) => {
@@ -680,7 +682,7 @@ export default function App() {
         ws1.getCell(curR + 9, sigX).value = `NIP. ${ctx.ttdNip || '-'}`;
 
         const ws2 = workbook.addWorksheet('2. Identifikasi');
-        const ws2Hdr = ['No', 'Tujuan / Sasaran', 'Indikator Kinerja', 'Risiko (Uraian)', 'Risiko (Kode)', 'Pemilik', 'Sebab (Uraian)', 'Sebab (Sumber)', 'Control (C/UC)', 'Dampak (Akibat)', 'Dampak (Pihak)'];
+        const ws2Hdr = ['No', riskType === 'operasional' ? 'Subkegiatan' : 'Tujuan / Sasaran', riskType === 'operasional' ? 'Indikator Keluaran' : 'Indikator Kinerja', 'Risiko (Uraian)', 'Risiko (Kode)', 'Pemilik', 'Sebab (Uraian)', 'Sebab (Sumber)', 'Control (C/UC)', 'Dampak (Akibat)', 'Dampak (Pihak)'];
         ws2.getRow(1).values = ws2Hdr;
         styleHdr(ws2, 1, ws2Hdr.length);
         
@@ -815,7 +817,7 @@ export default function App() {
         ws5.getRow(1).values = ws5Hdr;
         styleHdr(ws5, 1, ws5Hdr.length);
         risks.forEach((r, i) => {
-          if (r.resScore > 0) {
+          if (r.resScore > 0 && r.resLevel.level >= 3) {
             ws5.addRow([
               i + 1, 
               `${r.risikoKode}: ${r.risikoUraian}`, 
@@ -835,7 +837,7 @@ export default function App() {
         const ws6Hdr = ['No', 'Kegiatan Pengendalian', 'Media', 'Penyedia Informasi', 'Penerima Informasi', 'Rencana Waktu', 'Realisasi Waktu', 'Keterangan'];
         ws6.getRow(1).values = ws6Hdr;
         styleHdr(ws6, 1, ws6Hdr.length);
-        risks.filter(r => r.resScore > 0).forEach((r, i) => {
+        risks.filter(r => r.resScore > 0 && r.resLevel.level >= 3).forEach((r, i) => {
           ws6.addRow([
             i + 1, 
             r.rtpAction || '-', 
@@ -855,7 +857,7 @@ export default function App() {
         const ws7Hdr = ['No', 'Kegiatan Pengendalian', 'Bentuk/Metode Pemantauan', 'Penanggung Jawab', 'Rencana Waktu', 'Realisasi Waktu', 'Keterangan'];
         ws7.getRow(1).values = ws7Hdr;
         styleHdr(ws7, 1, ws7Hdr.length);
-        risks.filter(r => r.resScore > 0).forEach((r, i) => {
+        risks.filter(r => r.resScore > 0 && r.resLevel.level >= 3).forEach((r, i) => {
           ws7.addRow([
             i + 1, 
             r.rtpAction || '-', 
@@ -940,10 +942,10 @@ export default function App() {
         ];
 
         ctxRowsCommon.forEach(p => {
-          docPDF.setFontSize(8.5).setFont('helvetica', 'bold').text(p[0], m, y);
+          docPDF.setFontSize(8).setFont('helvetica', 'bold').text(p[0], m, y);
           docPDF.text(':', m + 50, y);
           docPDF.setFont('helvetica', 'normal').text(p[1], m + 53, y);
-          y += 5;
+          y += 4.2;
         });
 
         // Multiline support for Tujuan with aligned wrapping
@@ -953,16 +955,17 @@ export default function App() {
         docPDF.text(':', m + 50, y);
         const splitTujuan = docPDF.splitTextToSize(tujuanVal, pW - m - 53 - m);
         docPDF.setFont('helvetica', 'normal').text(splitTujuan, m + 53, y);
-        y += (splitTujuan.length * 4) + 3;
+        y += (splitTujuan.length * 4) + 1.5;
 
-        // Group 1: Sasaran (Left) & IKU Sasaran (Right)
-        if (y > pH - 50) { docPDF.addPage(); y = 25; }
-        const colW = (pW - (2 * m) - 6) / 2; // Increased gutter to 6mm
+        // Group 1: Program/Sasaran (Left) & Kegiatan Utama/IKU Sasaran (Right)
+        if (y > pH - 40) { docPDF.addPage(); y = 25; }
+        const colW = (pW - (2 * m) - 6) / 2; 
         const gutter = 3;
 
-        // Tabel 1 (Sasaran)
+        const startYGroup1 = y;
+        // Tabel 1 (Sasaran/Program)
         autoTable(docPDF, {
-          startY: y,
+          startY: startYGroup1,
           ...tS,
           margin: { left: m },
           tableWidth: colW,
@@ -970,58 +973,66 @@ export default function App() {
           body: (ctx.sasaran || []).map((s: string, i: number) => [i + 1, s]),
           columnStyles: { 0: { cellWidth: 8, halign: 'center' } }
         });
-        const finalY1L = (docPDF as any).lastAutoTable.finalY;
+        const finalY1L = (docPDF as any).lastAutoTable.finalY || startYGroup1;
 
-        // Tabel 2 (IKU Sasaran)
+        // Tabel 2 (IKU Sasaran / Kegiatan Utama)
         autoTable(docPDF, {
-          startY: y,
+          startY: startYGroup1,
           ...tS,
           margin: { left: m + colW + 6 },
           tableWidth: colW,
-          head: [['NO', riskType === 'operasional' ? 'KEGIATAN UTAMA' : 'IKU SASARAN OPD', 'TARGET']],
-          body: (ctx.ikuSasaran || []).map((v: any, i: number) => [i + 1, v.name || '-', v.target || '-']),
+          head: [riskType === 'operasional' ? ['NO', 'KEGIATAN UTAMA'] : ['NO', 'IKU SASARAN OPD', 'TARGET']],
+          body: (ctx.ikuSasaran || []).map((v: any, i: number) => {
+            if (riskType === 'operasional') return [i + 1, v.name || '-'];
+            return [i + 1, v.name || '-', v.target || '-'];
+          }),
           columnStyles: { 0: { cellWidth: 8, halign: 'center' }, 2: { cellWidth: 15, halign: 'center' } }
         });
-        const finalY1R = (docPDF as any).lastAutoTable.finalY;
+        const finalY1R = (docPDF as any).lastAutoTable.finalY || startYGroup1;
 
-        // Use the maximum Y from the previous row to align the next row of tables to avoid giant gaps and keep it tidy
         y = Math.max(finalY1L, finalY1R) + gutter;
 
-        // Group 2: Program (Left) & IKU Program (Right)
-        if (y > pH - 50) { docPDF.addPage(); y = 25; }
+        // Group 2: Subkegiatan/Program (Left) & Indikator Keluaran/IKU Program (Right)
+        const estH2 = Math.max((ctx.program || []).length, (ctx.ikuProgram || []).length) * 6 + 10;
+        if (y + estH2 > pH - 15) { docPDF.addPage(); y = 25; }
+        const startYGroup2 = y;
 
         autoTable(docPDF, {
-          startY: y,
+          startY: startYGroup2,
           ...tS,
           margin: { left: m },
           tableWidth: colW,
-          head: [['NO', riskType === 'operasional' ? 'SUBKEGIATAN UTAMA' : 'PROGRAM STRATEGIS']],
+          head: [['NO', riskType === 'operasional' ? 'SUBKEGIATAN' : 'PROGRAM STRATEGIS']],
           body: (ctx.program || []).map((p: string, i: number) => [i + 1, p]),
           columnStyles: { 0: { cellWidth: 8, halign: 'center' } }
         });
-        const finalY2L = (docPDF as any).lastAutoTable.finalY;
+        const finalY2L = (docPDF as any).lastAutoTable.finalY || startYGroup2;
 
         autoTable(docPDF, {
-          startY: y,
+          startY: startYGroup2,
           ...tS,
           margin: { left: m + colW + 6 },
           tableWidth: colW,
-          head: [['NO', riskType === 'operasional' ? 'KELUARAN / HASIL' : 'IKU PROGRAM OPD', 'TARGET']],
-          body: (ctx.ikuProgram || []).map((v: any, i: number) => [i + 1, v.name || '-', v.target || '-']),
-          columnStyles: { 0: { cellWidth: 8, halign: 'center' }, 2: { cellWidth: 15, halign: 'center' } }
+          head: [riskType === 'operasional' ? ['NO', 'INDIKATOR KELUARAN'] : ['NO', 'IKU PROGRAM OPD', 'TARGET']],
+          body: (ctx.ikuProgram || []).map((v: any, i: number) => {
+            if (riskType === 'operasional') return [i + 1, v.name || '-'];
+            return [i + 1, v.name || '-', v.target || '-'];
+          }),
+          columnStyles: { 0: { cellWidth: 8, halign: 'center' }, ...(riskType === 'operasional' ? {} : { 2: { cellWidth: 15, halign: 'center' } }) }
         });
-        const finalY2R = (docPDF as any).lastAutoTable.finalY;
-        y = Math.max(finalY2L, finalY2R) + 4; 
+        const finalY2R = (docPDF as any).lastAutoTable.finalY || startYGroup2;
+        y = Math.max(finalY2L, finalY2R); 
 
-        if (y > pH - 15) { docPDF.addPage(); y = 15; }
-        docPDF.setFontSize(8.5).setFont('helvetica', 'bold').text('Informasi Lain', m, y);
+        if (y > pH - 10) { docPDF.addPage(); y = 15; }
+        y += 0.5;
+        docPDF.setFontSize(8).setFont('helvetica', 'bold').text('Informasi Lain', m, y);
         docPDF.text(':', m + 50, y);
         const splitInfo = docPDF.splitTextToSize(`${ctx.informasiLain || '-'}`, pW - m - 53 - m);
         docPDF.setFont('helvetica', 'normal').text(splitInfo, m + 53, y);
-        y += (splitInfo.length * 4) + 2;
+        y += (splitInfo.length * 4) + 1.5;
 
         const stText = riskType === 'operasional' 
-          ? 'Tujuan, Program, Kegiatan Utama, Subkegiatan Utama yang akan dilakukan penilaian risiko'
+          ? 'Program, Kegiatan, Subkegiatan, dan Keluaran/Hasil Subkegiatan yang akan dilakukan penilaian risiko'
           : 'Tujuan, Sasaran, Program Strategis, IKU Program yang akan dilakukan penilaian risiko';
         
         if (y > pH - 25) { docPDF.addPage(); y = 20; }
@@ -1036,10 +1047,10 @@ export default function App() {
           ...tS,
           head: [[
             'NO', 
-            riskType === 'operasional' ? 'TUJUAN OPERASIONAL' : 'TUJUAN STRATEGIS', 
-            riskType === 'operasional' ? 'PROGRAM' : 'SASARAN STRATEGIS', 
-            riskType === 'operasional' ? 'SUBKEGIATAN UTAMA' : 'PROGRAM STRATEGIS', 
-            riskType === 'operasional' ? 'KELUARAN/HASIL' : 'IKU PROGRAM'
+            riskType === 'operasional' ? 'PROGRAM' : 'TUJUAN STRATEGIS', 
+            riskType === 'operasional' ? 'KEGIATAN' : 'SASARAN STRATEGIS', 
+            riskType === 'operasional' ? 'SUBKEGIATAN' : 'PROGRAM STRATEGIS', 
+            riskType === 'operasional' ? 'KELUARAN/HASIL SUBKEGIATAN' : 'IKU PROGRAM'
           ]],
           body: aRows.map((r: any, i: number) => [i + 1, r.tujuan, r.sasaran, r.program, r.iku]),
           columnStyles: { 0: { cellWidth: 8, halign: 'center' } }
@@ -1054,7 +1065,7 @@ export default function App() {
         const pdfPages = [
           { 
             t: 'II. IDENTIFIKASI RISIKO', 
-            h: [['NO', 'TUJUAN / SASARAN', 'INDIKATOR', 'RISIKO (URAIAN)', 'KODE', 'PEMILIK', 'SEBAB', 'SUMBER', 'C/UC', 'AKIBAT', 'PIHAK']], 
+            h: [['NO', riskType === 'operasional' ? 'SUBKEGIATAN' : 'TUJUAN / SASARAN', riskType === 'operasional' ? 'INDIKATOR KELUARAN' : 'INDIKATOR', 'RISIKO (URAIAN)', 'KODE', 'PEMILIK', 'SEBAB', 'SUMBER', 'C/UC', 'AKIBAT', 'PIHAK']], 
             b: risks.flatMap((r, i) => {
               const srsRaw = r.subRows || [];
               const srs = (srsRaw.length > 0 && (srsRaw[0].sebabUraian?.trim() || srsRaw[0].dampakUraian?.trim()))
@@ -1160,7 +1171,7 @@ export default function App() {
           { 
             t: 'V. RENCANA PENANGANAN RISIKO (RTP)', 
             h: [['NO', 'RISIKO (RESIDUAL)', 'PENGENDALIAN SISA', 'CELAH SISA', 'RENCANA TINDAK (RTP) BARU', 'PJ', 'DEADLINE']], 
-            b: risks.filter(r => r.resScore > 0).map((r, i) => [
+            b: risks.filter(r => r.resScore > 0 && r.resLevel.level >= 3).map((r, i) => [
               i + 1, 
               `${r.risikoKode}: ${r.risikoUraian}`, 
               r.rtpControl, 
@@ -1195,7 +1206,7 @@ export default function App() {
           { 
             t: 'VI. KOMUNIKASI PENGENDALIAN', 
             h: [['NO', 'KEGIATAN PENGENDALIAN', 'MEDIA / SARANA', 'PENYEDIA', 'PENERIMA', 'RENCANA', 'REALISASI', 'KET']], 
-            b: risks.filter(r => r.resScore > 0).map((r, i) => [
+            b: risks.filter(r => r.resScore > 0 && r.resLevel.level >= 3).map((r, i) => [
               i + 1, 
               r.rtpAction || '-', 
               r.commMedia || '-', 
@@ -1210,7 +1221,7 @@ export default function App() {
           { 
             t: 'VII. RENCANA MONITORING PI', 
             h: [['NO', 'KEGIATAN PENGENDALIAN', 'METODE PEMANTAUAN', 'PJ', 'RENCANA', 'REALISASI', 'KETERANGAN']], 
-            b: risks.filter(r => r.resScore > 0).map((r, i) => [
+            b: risks.filter(r => r.resScore > 0 && r.resLevel.level >= 3).map((r, i) => [
               i + 1, 
               r.rtpAction || '-', 
               r.monMethod || '-', 
@@ -2242,7 +2253,7 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
       const treatmentRisks = baseRisks.map(r => {
         const stats = getScoreAndLevel(r, 'res');
         return { ...r, stats };
-      }).filter(r => r.stats.score > 0);
+      }).filter(r => r.stats.score > 0 && r.stats.level >= 3);
 
       if (treatmentRisks.length === 0 && baseRisks.length > 0) {
         // Technically if no risks have residual score, Menu V is empty, but we might want to flag that Menu IV isn't done
@@ -2268,7 +2279,7 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
       const missingComm: string[] = [];
       const commRisks = sortedByDefault.filter(r => {
         const stats = getScoreAndLevel(r, 'res');
-        return stats.score > 0;
+        return stats.score > 0 && stats.level >= 3;
       });
 
       if (commRisks.length === 0 && baseRisks.length > 0) {
@@ -2290,7 +2301,7 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
       const missingPi: string[] = [];
       const piRisks = sortedByDefault.filter(r => {
         const stats = getScoreAndLevel(r, 'res');
-        return stats.score > 0;
+        return stats.score > 0 && stats.level >= 3;
       });
 
       if (piRisks.length === 0 && baseRisks.length > 0) {
@@ -6192,8 +6203,8 @@ function MonitoringCommunicationView({ user, isReadOnly, riskType }: { user: any
         };
       });
 
-      // Show risks that have been assessed for residual risk
-      const filtered = data.filter(r => r.resScore > 0);
+      // Show risks that have been assessed for residual risk with "Tinggi" or "Sangat Tinggi" level
+      const filtered = data.filter(r => r.resScore > 0 && r.resRiskLevel >= 3);
 
       // SORT: Primarily by residual level, then by score descending
       filtered.sort((a, b) => {
@@ -6434,8 +6445,8 @@ function MonitoringPlanPIView({ user, isReadOnly, riskType }: { user: any, isRea
         };
       });
 
-      // Show risks that have been assessed for residual risk
-      const filtered = data.filter(r => r.resScore > 0);
+      // Show risks that have been assessed for residual risk with "Tinggi" or "Sangat Tinggi" level
+      const filtered = data.filter(r => r.resScore > 0 && r.resRiskLevel >= 3);
       
       filtered.sort((a, b) => {
         if (b.resRiskLevel !== a.resRiskLevel) return b.resRiskLevel - a.resRiskLevel;
