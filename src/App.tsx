@@ -2341,7 +2341,7 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
       const hasOccurrence = (sortedByDefault.length > 0) && missingOcc.length === 0;
       if (!hasOccurrence) reasons.occurrence = "Kekurangan Menu IX: " + missingOcc.slice(0, 2).join('; ');
 
-      const hasFinalDoc = finalDocsState.some(d => d.id === acc.uid && d.link?.trim() && d.status === 'verified');
+      const hasFinalDoc = finalDocsState.some(d => (d.id === acc.uid || d.uid === acc.uid) && (d.status === 'verified' || d.status === 'Verified'));
 
       const allSteps = [
         hasContext, 
@@ -2356,22 +2356,27 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
         hasFinalDoc
       ];
       const completedCount = allSteps.filter(Boolean).length;
-      const finalPercent = Math.round((completedCount / 10) * 100);
+      let finalPercent = Math.round((completedCount / 10) * 100);
+      
+      // Force 100% if verified
+      if (hasFinalDoc) {
+        finalPercent = 100;
+      }
 
       allStats[acc.uid] = {
         total: baseRisks.length,
         percent: finalPercent,
         reasons: reasons,
         checks: {
-          context: hasContext,
-          identification: hasIdentification,
-          analysis: hasAnalysis,
-          residual: hasResidual,
-          treatment: hasTreatment,
-          comm: hasComm,
-          pi: hasPiPlan,
-          heatmap: hasHeatmap,
-          occurrence: hasOccurrence,
+          context: hasFinalDoc || hasContext,
+          identification: hasFinalDoc || hasIdentification,
+          analysis: hasFinalDoc || hasAnalysis,
+          residual: hasFinalDoc || hasResidual,
+          treatment: hasFinalDoc || hasTreatment,
+          comm: hasFinalDoc || hasComm,
+          pi: hasFinalDoc || hasPiPlan,
+          heatmap: hasFinalDoc || hasHeatmap,
+          occurrence: hasFinalDoc || hasOccurrence,
           finalDoc: hasFinalDoc
         }
       };
@@ -2541,7 +2546,7 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
               const s = stats[acc.uid] || { total: 0, percent: 0, checks: {}, reasons: {} };
               return (
                 <div 
-                  key={acc.id} 
+                  key={acc.uid} 
                   className="p-5 border border-slate-200 rounded-2xl hover:shadow-xl hover:border-blue-200 transition-all group bg-white flex flex-col h-full relative"
                 >
                   {/* Tooltip Overlay */}
@@ -2572,7 +2577,9 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-2xl font-black text-blue-600 leading-none">{s.percent}%</div>
+                      <div className={`text-2xl font-black leading-none ${s.percent === 100 ? 'text-emerald-600' : 'text-blue-600'}`}>
+                        {s.percent}%
+                      </div>
                       <div className="text-[8px] font-bold text-slate-400 uppercase">Progres</div>
                     </div>
                   </div>
@@ -2665,6 +2672,16 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
                            <span className="text-[8px] font-black uppercase tracking-tight text-slate-400 font-mono">Menu VIII</span>
                            <div className="flex items-center gap-1">
                               <span className={`text-[9px] font-bold ${s.checks.heatmap ? 'text-emerald-700' : 'text-slate-400'}`}>Peta Risiko</span>
+                           </div>
+                        </div>
+                        <div 
+                          onMouseEnter={() => !s.checks.occurrence && setActiveTooltip({ accId: acc.uid, menuKey: 'occ', msg: s.reasons.occurrence })}
+                          onMouseLeave={() => setActiveTooltip(null)}
+                          className={`p-2 rounded-lg border flex flex-col gap-1 transition-all ${s.checks.occurrence ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-100 opacity-50 hover:bg-slate-100'}`}
+                        >
+                           <span className="text-[8px] font-black uppercase tracking-tight text-slate-400 font-mono">Menu IX</span>
+                           <div className="flex items-center gap-1">
+                              <span className={`text-[9px] font-bold ${s.checks.occurrence ? 'text-emerald-700' : 'text-slate-400'}`}>Monitoring</span>
                            </div>
                         </div>
                         <div 
