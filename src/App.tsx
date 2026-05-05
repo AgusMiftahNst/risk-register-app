@@ -904,34 +904,39 @@ export default function App() {
         
         const hdrPDF = (title: string) => {
           docPDF.setFontSize(14).setFont('helvetica', 'bold');
+          docPDF.setTextColor(30, 41, 59);
           const t = `${title} ${typeLabel} OPD`;
           const tw = docPDF.getTextWidth(t);
-          docPDF.text(t, (pW - tw) / 2, 15);
-          docPDF.setDrawColor(themeColor[0], themeColor[1], themeColor[2]).setLineWidth(0.8).line(m, 18, pW - m, 18);
+          docPDF.text(t, (pW - tw) / 2, 6);
+          docPDF.setDrawColor(themeColor[0], themeColor[1], themeColor[2]).setLineWidth(0.8).line(m, 8, pW - m, 8);
+          docPDF.setTextColor(0, 0, 0); // reset
         };
 
         const sigPDF = (y: number) => {
           if (y > pH - 65) { docPDF.addPage(); y = 30; }
           const x = pW - 90;
-          docPDF.setFontSize(10).setFont('helvetica', 'normal').text(`${ctx.ttdTempat || 'Paniai'}, ${ctx.ttdBulan || '-'}`, x, y);
-          y += 6; docPDF.setFont('helvetica', 'bold').text(`${ctx.ttdJabatan || '-'}`, x, y);
-          y += 6; docPDF.text(`${ctx.ttdKabupaten || 'Kabupaten Paniai'}`, x, y);
-          y += 20; docPDF.text(`${ctx.ttdNama || '(Nama)'}`, x, y);
-          docPDF.line(x, y + 1.2, x + docPDF.getTextWidth(ctx.ttdNama || '(Nama)'), y + 1.2);
-          y += 6; docPDF.setFont('helvetica', 'normal').text(`Pangkat: ${ctx.ttdPangkat || '-'}`, x, y);
-          y += 5; docPDF.text(`NIP. ${ctx.ttdNip || '-'}`, x, y);
+          docPDF.setDrawColor(203, 213, 225).setLineWidth(0.1);
+          docPDF.line(x - 5, y - 5, pW - m, y - 5);
+          
+          docPDF.setFontSize(9).setFont('helvetica', 'normal').setTextColor(100, 116, 139).text(`${ctx.ttdTempat || 'Paniai'}, ${ctx.ttdBulan || '-'}`, x, y);
+          y += 6; docPDF.setFontSize(10).setFont('helvetica', 'bold').setTextColor(30, 41, 59).text(`${ctx.ttdJabatan || '-'}`, x, y);
+          y += 5; docPDF.text(`${ctx.ttdKabupaten || 'Kabupaten Paniai'}`, x, y);
+          y += 18; docPDF.text(`${ctx.ttdNama || '(Nama)'}`, x, y);
+          docPDF.setDrawColor(30, 41, 59).setLineWidth(0.5).line(x, y + 1.2, x + docPDF.getTextWidth(ctx.ttdNama || '(Nama)'), y + 1.2);
+          y += 6; docPDF.setFontSize(9).setFont('helvetica', 'normal').setTextColor(100, 116, 139).text(`Pangkat: ${ctx.ttdPangkat || '-'}`, x, y);
+          y += 4.5; docPDF.text(`NIP. ${ctx.ttdNip || '-'}`, x, y);
         };
 
         const tS: any = {
-          fontSize: 7, cellPadding: 1.5, valign: 'middle',
-          headStyles: { fillColor: themeColor, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 7.5 },
-          margin: { top: 20, left: m, right: m, bottom: 15 },
-          styles: { textColor: [30, 41, 59], lineColor: [200, 200, 200], lineWidth: 0.1, overflow: 'linebreak' },
-          alternateRowStyles: { fillColor: [249, 250, 251] }
+          fontSize: 7.5, cellPadding: 2, valign: 'middle',
+          headStyles: { fillColor: themeColor, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 8 },
+          margin: { top: 12, bottom: 12 },
+          styles: { textColor: [30, 41, 59], lineColor: [226, 232, 240], lineWidth: 0.1, overflow: 'linebreak' },
+          alternateRowStyles: { fillColor: [248, 250, 252] }
         };
 
         hdrPDF('I. PENETAPAN KONTEKS RISIKO');
-        let y = 22;
+        let y = 12;
         const ctxRowsCommon = [
           ['Nama Pemerintah Daerah', `${ctx.namaPemda || '-'}`],
           ['Tahun Penilaian', `${ctx.tahunPenilaian || '-'}`],
@@ -942,121 +947,145 @@ export default function App() {
         ];
 
         ctxRowsCommon.forEach(p => {
-          docPDF.setFontSize(8).setFont('helvetica', 'bold').text(p[0], m, y);
-          docPDF.text(':', m + 50, y);
-          docPDF.setFont('helvetica', 'normal').text(p[1], m + 53, y);
-          y += 4.2;
+          docPDF.setFontSize(8).setFont('helvetica', 'bold').setTextColor(71, 85, 105).text(p[0], m, y);
+          docPDF.text(':', m + 42, y);
+          docPDF.setFont('helvetica', 'normal').setTextColor(30, 41, 59).text(p[1], m + 45, y);
+          y += 4.5;
         });
 
-        // Multiline support for Tujuan with aligned wrapping
         const tujuanLabel = riskType === 'operasional' ? 'Tujuan Operasional' : 'Tujuan Strategis';
         const tujuanVal = `${ctx.tujuanStrategis || '-'}`;
-        docPDF.setFont('helvetica', 'bold').text(tujuanLabel, m, y);
-        docPDF.text(':', m + 50, y);
-        const splitTujuan = docPDF.splitTextToSize(tujuanVal, pW - m - 53 - m);
-        docPDF.setFont('helvetica', 'normal').text(splitTujuan, m + 53, y);
-        y += (splitTujuan.length * 4) + 1.5;
+        docPDF.setFontSize(8).setFont('helvetica', 'bold').setTextColor(71, 85, 105).text(tujuanLabel, m, y);
+        docPDF.text(':', m + 42, y);
+        const splitTujuan = docPDF.splitTextToSize(tujuanVal, pW - m - 45 - m);
+        docPDF.setFont('helvetica', 'normal').setTextColor(30, 41, 59).text(splitTujuan, m + 45, y);
+        y += (splitTujuan.length * 4.2) + 3;
 
-        // Group 1: Program/Sasaran (Left) & Kegiatan Utama/IKU Sasaran (Right)
-        if (y > pH - 40) { docPDF.addPage(); y = 25; }
-        const colW = (pW - (2 * m) - 6) / 2; 
-        const gutter = 3;
+        // Visual Separator
+        docPDF.setDrawColor(241, 245, 249).setLineWidth(0.1).line(m, y - 1, pW - m, y - 1);
 
-        const startYGroup1 = y;
-        // Tabel 1 (Sasaran/Program)
-        autoTable(docPDF, {
-          startY: startYGroup1,
-          ...tS,
-          margin: { left: m },
-          tableWidth: colW,
-          head: [['NO', riskType === 'operasional' ? 'PROGRAM' : 'SASARAN STRATEGIS']],
-          body: (ctx.sasaran || []).map((s: string, i: number) => [i + 1, s]),
-          columnStyles: { 0: { cellWidth: 8, halign: 'center' } }
-        });
-        const finalY1L = (docPDF as any).lastAutoTable.finalY || startYGroup1;
-
-        // Tabel 2 (IKU Sasaran / Kegiatan Utama)
-        autoTable(docPDF, {
-          startY: startYGroup1,
-          ...tS,
-          margin: { left: m + colW + 6 },
-          tableWidth: colW,
-          head: [riskType === 'operasional' ? ['NO', 'KEGIATAN UTAMA'] : ['NO', 'IKU SASARAN OPD', 'TARGET']],
-          body: (ctx.ikuSasaran || []).map((v: any, i: number) => {
-            if (riskType === 'operasional') return [i + 1, v.name || '-'];
-            return [i + 1, v.name || '-', v.target || '-'];
-          }),
-          columnStyles: { 0: { cellWidth: 8, halign: 'center' }, 2: { cellWidth: 15, halign: 'center' } }
-        });
-        const finalY1R = (docPDF as any).lastAutoTable.finalY || startYGroup1;
-
-        y = Math.max(finalY1L, finalY1R) + gutter;
-
-        // Group 2: Subkegiatan/Program (Left) & Indikator Keluaran/IKU Program (Right)
-        const estH2 = Math.max((ctx.program || []).length, (ctx.ikuProgram || []).length) * 6 + 10;
-        if (y + estH2 > pH - 15) { docPDF.addPage(); y = 25; }
-        const startYGroup2 = y;
+        // Group 1: Combined Table
+        if (y > pH - 50) { docPDF.addPage(); y = 15; }
+        
+        docPDF.setFontSize(8.5).setFont('helvetica', 'bold').setTextColor(themeColor[0], themeColor[1], themeColor[2]);
+        docPDF.text(riskType === 'operasional' ? 'PROGRAM & KEGIATAN UTAMA' : 'SASARAN & IKU SASARAN STRATEGIS', m, y);
+        y += 4;
 
         autoTable(docPDF, {
-          startY: startYGroup2,
+          startY: y,
           ...tS,
-          margin: { left: m },
-          tableWidth: colW,
-          head: [['NO', riskType === 'operasional' ? 'SUBKEGIATAN' : 'PROGRAM STRATEGIS']],
-          body: (ctx.program || []).map((p: string, i: number) => [i + 1, p]),
-          columnStyles: { 0: { cellWidth: 8, halign: 'center' } }
+          margin: { left: m, right: m },
+          head: [
+            riskType === 'operasional' 
+              ? [{ content: 'NO', styles: { halign: 'center' } }, 'PROGRAM', { content: 'NO', styles: { halign: 'center' } }, 'KEGIATAN UTAMA']
+              : [{ content: 'NO', styles: { halign: 'center' } }, 'SASARAN STRATEGIS', { content: 'NO', styles: { halign: 'center' } }, 'IKU SASARAN OPD', { content: 'TARGET', styles: { halign: 'center' } }]
+          ],
+          body: (() => {
+            const sasaran = ctx.sasaran || [];
+            const ikuSasaran = ctx.ikuSasaran || [];
+            const maxLen = Math.max(sasaran.length, ikuSasaran.length);
+            const rows = [];
+            for (let i = 0; i < maxLen; i++) {
+              const s = sasaran[i] || '';
+              const iku = ikuSasaran[i] || {};
+              const ikuName = iku.name || '';
+              const ikuTarget = iku.target || '';
+              
+              if (riskType === 'operasional') {
+                rows.push([s ? i + 1 : '', s, ikuName ? i + 1 : '', ikuName]);
+              } else {
+                rows.push([s ? i + 1 : '', s, ikuName ? i + 1 : '', ikuName, ikuTarget]);
+              }
+            }
+            return rows;
+          })(),
+          columnStyles: { 
+            0: { cellWidth: 8, halign: 'center' },
+            2: { cellWidth: 8, halign: 'center' },
+            ...(riskType === 'operasional' ? {} : { 4: { cellWidth: 18, halign: 'center' } })
+          },
+          theme: 'grid'
         });
-        const finalY2L = (docPDF as any).lastAutoTable.finalY || startYGroup2;
+        y = (docPDF as any).lastAutoTable.finalY + 6;
+
+        // Group 2: Combined Table
+        if (y > pH - 50) { docPDF.addPage(); y = 15; }
+        
+        docPDF.setFontSize(8.5).setFont('helvetica', 'bold').setTextColor(themeColor[0], themeColor[1], themeColor[2]);
+        docPDF.text(riskType === 'operasional' ? 'SUBKEGIATAN & INDIKATOR KELUARAN' : 'PROGRAM & IKU PROGRAM STRATEGIS', m, y);
+        y += 4;
 
         autoTable(docPDF, {
-          startY: startYGroup2,
+          startY: y,
           ...tS,
-          margin: { left: m + colW + 6 },
-          tableWidth: colW,
-          head: [riskType === 'operasional' ? ['NO', 'INDIKATOR KELUARAN'] : ['NO', 'IKU PROGRAM OPD', 'TARGET']],
-          body: (ctx.ikuProgram || []).map((v: any, i: number) => {
-            if (riskType === 'operasional') return [i + 1, v.name || '-'];
-            return [i + 1, v.name || '-', v.target || '-'];
-          }),
-          columnStyles: { 0: { cellWidth: 8, halign: 'center' }, ...(riskType === 'operasional' ? {} : { 2: { cellWidth: 15, halign: 'center' } }) }
-        });
-        const finalY2R = (docPDF as any).lastAutoTable.finalY || startYGroup2;
-        y = Math.max(finalY2L, finalY2R); 
+          margin: { left: m, right: m },
+          head: [
+            riskType === 'operasional'
+              ? [{ content: 'NO', styles: { halign: 'center' } }, 'SUBKEGIATAN', { content: 'NO', styles: { halign: 'center' } }, 'INDIKATOR KELUARAN']
+              : [{ content: 'NO', styles: { halign: 'center' } }, 'PROGRAM STRATEGIS', { content: 'NO', styles: { halign: 'center' } }, 'IKU PROGRAM OPD', { content: 'TARGET', styles: { halign: 'center' } }]
+          ],
+          body: (() => {
+            const program = ctx.program || [];
+            const ikuProgram = ctx.ikuProgram || [];
+            const maxLen = Math.max(program.length, ikuProgram.length);
+            const rows = [];
+            for (let i = 0; i < maxLen; i++) {
+              const p = program[i] || '';
+              const iku = ikuProgram[i] || {};
+              const ikuName = iku.name || '';
+              const ikuTarget = iku.target || '';
 
-        if (y > pH - 10) { docPDF.addPage(); y = 15; }
-        y += 0.5;
-        docPDF.setFontSize(8).setFont('helvetica', 'bold').text('Informasi Lain', m, y);
-        docPDF.text(':', m + 50, y);
-        const splitInfo = docPDF.splitTextToSize(`${ctx.informasiLain || '-'}`, pW - m - 53 - m);
-        docPDF.setFont('helvetica', 'normal').text(splitInfo, m + 53, y);
-        y += (splitInfo.length * 4) + 1.5;
+              if (riskType === 'operasional') {
+                rows.push([p ? i + 1 : '', p, ikuName ? i + 1 : '', ikuName]);
+              } else {
+                rows.push([p ? i + 1 : '', p, ikuName ? i + 1 : '', ikuName, ikuTarget]);
+              }
+            }
+            return rows;
+          })(),
+          columnStyles: { 
+            0: { cellWidth: 8, halign: 'center' },
+            2: { cellWidth: 8, halign: 'center' },
+            ...(riskType === 'operasional' ? {} : { 4: { cellWidth: 18, halign: 'center' } })
+          },
+          theme: 'grid'
+        });
+        y = (docPDF as any).lastAutoTable.finalY + 6; 
+
+        if (y > pH - 30) { docPDF.addPage(); y = 18; }
+        docPDF.setFontSize(8.5).setFont('helvetica', 'bold').setTextColor(71, 85, 105).text('Informasi Lain', m, y);
+        docPDF.text(':', m + 42, y);
+        const splitInfo = docPDF.splitTextToSize(`${ctx.informasiLain || '-'}`, pW - m - 45 - m);
+        docPDF.setFont('helvetica', 'normal').setTextColor(30, 41, 59).text(splitInfo, m + 45, y);
+        y += (splitInfo.length * 4.5) + 6;
 
         const stText = riskType === 'operasional' 
-          ? 'Program, Kegiatan, Subkegiatan, dan Keluaran/Hasil Subkegiatan yang akan dilakukan penilaian risiko'
-          : 'Tujuan, Sasaran, Program Strategis, IKU Program yang akan dilakukan penilaian risiko';
+          ? 'Penilaian Risiko dilakukan terhadap Program, Kegiatan, Subkegiatan, dan Keluaran/Hasil Subkegiatan berikut:'
+          : 'Penilaian Risiko dilakukan terhadap Tujuan, Sasaran, Program Strategis, dan IKU Program berikut:';
         
-        if (y > pH - 25) { docPDF.addPage(); y = 20; }
-        docPDF.setFontSize(8.5).setFont('helvetica', 'bold');
+        if (y > pH - 35) { docPDF.addPage(); y = 40; }
+        docPDF.setFontSize(9).setFont('helvetica', 'bold').setTextColor(themeColor[0], themeColor[1], themeColor[2]);
         const stTextSplit = docPDF.splitTextToSize(stText, pW - m - m);
         docPDF.text(stTextSplit, m, y);
-        y += (stTextSplit.length * 4) + 2;
+        y += (stTextSplit.length * 5) + 3;
 
         const aRows = ctx.assessmentRows || [];
         autoTable(docPDF, {
           startY: y,
           ...tS,
           head: [[
-            'NO', 
+            { content: 'NO', styles: { halign: 'center' } }, 
             riskType === 'operasional' ? 'PROGRAM' : 'TUJUAN STRATEGIS', 
             riskType === 'operasional' ? 'KEGIATAN' : 'SASARAN STRATEGIS', 
             riskType === 'operasional' ? 'SUBKEGIATAN' : 'PROGRAM STRATEGIS', 
             riskType === 'operasional' ? 'KELUARAN/HASIL SUBKEGIATAN' : 'IKU PROGRAM'
           ]],
           body: aRows.map((r: any, i: number) => [i + 1, r.tujuan, r.sasaran, r.program, r.iku]),
-          columnStyles: { 0: { cellWidth: 8, halign: 'center' } }
+          columnStyles: { 0: { cellWidth: 10, halign: 'center' } },
+          theme: 'grid'
         });
 
-        sigPDF((docPDF as any).lastAutoTable.finalY + 12);
+        sigPDF((docPDF as any).lastAutoTable.finalY + 15);
 
 
         const participantCount = ctx.participantCount || 5;
@@ -1969,7 +1998,7 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
 
       // Consolidated Identification Table
       doc.addPage();
-      doc.setFontSize(12).text(`KONSOLIDASI IDENTIFIKASI RISIKO - ${typeLabel}`, 15, 15);
+      doc.setFontSize(12).setFont('helvetica', 'bold').text(`KONSOLIDASI IDENTIFIKASI RISIKO - ${typeLabel}`, pW / 2, 15, { align: 'center' });
       
       const body: any[] = [];
       sortedAccounts.forEach(acc => {
@@ -2011,7 +2040,7 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
 
       // Residual Summary Table
       doc.addPage();
-      doc.setFontSize(12).text(`KONSOLIDASI EVALUASI & RTP - ${typeLabel}`, 15, 15);
+      doc.setFontSize(12).setFont('helvetica', 'bold').text(`KONSOLIDASI EVALUASI & RTP - ${typeLabel}`, pW / 2, 15, { align: 'center' });
       
       const resBody: any[] = [];
       sortedAccounts.forEach(acc => {
@@ -2339,7 +2368,7 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
         });
       }
       const hasOccurrence = (sortedByDefault.length > 0) && missingOcc.length === 0;
-      if (!hasOccurrence) reasons.occurrence = "Kekurangan Menu IX: " + missingOcc.slice(0, 2).join('; ');
+      // if (!hasOccurrence) reasons.occurrence = "Kekurangan Menu IX: " + missingOcc.slice(0, 2).join('; ');
 
       const hasFinalDoc = finalDocsState.some(d => (d.id === acc.uid || d.uid === acc.uid) && (d.status === 'verified' || d.status === 'Verified'));
 
@@ -2352,11 +2381,11 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
         hasComm, 
         hasPiPlan, 
         hasHeatmap,
-        hasOccurrence,
+        // hasOccurrence,
         hasFinalDoc
       ];
       const completedCount = allSteps.filter(Boolean).length;
-      let finalPercent = Math.round((completedCount / 10) * 100);
+      let finalPercent = Math.round((completedCount / 9) * 100);
       
       // Force 100% if verified
       if (hasFinalDoc) {
@@ -2376,7 +2405,7 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
           comm: hasFinalDoc || hasComm,
           pi: hasFinalDoc || hasPiPlan,
           heatmap: hasFinalDoc || hasHeatmap,
-          occurrence: hasFinalDoc || hasOccurrence,
+          // occurrence: hasFinalDoc || hasOccurrence,
           finalDoc: hasFinalDoc
         }
       };
@@ -2405,50 +2434,29 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
   const handleDownloadReport = async () => {
     setIsExporting(true);
     try {
-      const { jsPDF } = await import('jspdf');
-      const autoTable = (await import('jspdf-autotable')).default;
-      
-      const doc = new jsPDF('p', 'mm', 'a4');
-      const timestamp = new Date().toLocaleString('id-ID');
-      
-      doc.setFontSize(16);
-      doc.text('LAPORAN MONITORING PROGRESS PENGISIAN', 105, 15, { align: 'center' });
-      doc.setFontSize(10);
-      doc.text(`Kategori: ${filterRiskType.toUpperCase()} | Waktu: ${timestamp}`, 105, 22, { align: 'center' });
+      const element = document.getElementById('progress-report-template');
+      if (!element) throw new Error('Template tidak ditemukan');
 
-      const tableData = sortedAccounts
-        .filter(acc => {
-          const role = (acc.role || '').toLowerCase();
-          // Exclude admin and operator, only show user
-          return role === 'user';
-        })
-        .map((acc, idx) => {
-          const s = stats[acc.uid] || { percent: 0 };
-          return [
-            idx + 1,
-            acc.username || '-',
-            `${s.percent || 0}%`
-          ];
-        });
-
-      autoTable(doc, {
-        startY: 30,
-        head: [['No', 'Nama OPD', 'Progress %']],
-        body: tableData,
-        theme: 'grid',
-        headStyles: { fillColor: [51, 65, 85], textColor: 255, fontStyle: 'bold', halign: 'center' },
-        columnStyles: {
-          0: { cellWidth: 15, halign: 'center' },
-          1: { cellWidth: 'auto' },
-          2: { cellWidth: 35, halign: 'center' }
-        },
-        styles: { fontSize: 9 }
+      // Temporarily show the template for capture
+      element.style.display = 'block';
+      
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false
       });
 
-      doc.save(`Progress_Monitoring_${filterRiskType}_${new Date().toISOString().split('T')[0]}.pdf`);
+      element.style.display = 'none';
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.9);
+      const link = document.createElement('a');
+      link.href = imgData;
+      link.download = `Laporan_Progress_${filterRiskType}_${new Date().toISOString().split('T')[0]}.jpg`;
+      link.click();
     } catch (err) {
       console.error('Export error:', err);
-      alert('Gagal mengunduh laporan');
+      alert('Gagal mengunduh laporan JPG: ' + (err instanceof Error ? err.message : 'Unknown error'));
     } finally {
       setIsExporting(false);
     }
@@ -2458,6 +2466,95 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
 
   return (
     <div className="space-y-6">
+      {/* Hidden Report Template for Capture */}
+      <div 
+        id="progress-report-template" 
+        style={{ display: 'none', position: 'fixed', left: '-9999px', width: '800px', padding: '40px', background: '#ffffff', color: '#0f172a' }}
+      >
+        <div className="flex items-center justify-between mb-8 pb-6" style={{ borderBottom: '2px solid #0f172a' }}>
+           <div className="flex items-center gap-4">
+              <img src="/logo.png" alt="Logo" className="w-16 h-16 object-contain" crossOrigin="anonymous" />
+              <div>
+                 <h1 className="text-3xl font-black leading-none tracking-tighter" style={{ color: '#0f172a' }}>ISMAN</h1>
+                 <p className="text-[10px] font-bold uppercase tracking-widest mt-1" style={{ color: '#64748b' }}>Integrated Risk Management System</p>
+              </div>
+           </div>
+           <div className="text-right">
+              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#94a3b8' }}>Laporan Monitoring</p>
+              <p className="text-xl font-black uppercase" style={{ color: '#0f172a' }}>Progres Pengisian</p>
+           </div>
+        </div>
+
+        <div className="flex justify-between items-end mb-6">
+           <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest leading-none mb-1" style={{ color: '#94a3b8' }}>Kategori Risiko</p>
+              <span 
+                className="px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider text-white"
+                style={{ backgroundColor: filterRiskType === 'strategis' ? '#2563eb' : '#059669' }}
+              >
+                {filterRiskType}
+              </span>
+           </div>
+           <div className="text-right">
+              <p className="text-[10px] font-bold uppercase tracking-widest leading-none mb-1" style={{ color: '#94a3b8' }}>Waktu Cetak</p>
+              <p className="text-sm font-bold" style={{ color: '#0f172a' }}>{new Date().toLocaleString('id-ID')}</p>
+           </div>
+        </div>
+
+        <div className="rounded-xl overflow-hidden mb-8" style={{ border: '1px solid #e2e8f0' }}>
+           <table className="w-full border-collapse">
+              <thead>
+                 <tr className="text-white" style={{ backgroundColor: '#0f172a' }}>
+                    <th className="py-3 px-4 text-center text-xs font-black uppercase tracking-widest w-16">No</th>
+                    <th className="py-3 px-4 text-left text-xs font-black uppercase tracking-widest">Nama OPD / Unit Kerja</th>
+                    <th className="py-3 px-4 text-center text-xs font-black uppercase tracking-widest w-32">Progress</th>
+                 </tr>
+              </thead>
+              <tbody>
+                 {sortedAccounts
+                  .filter(acc => (acc.role || '').toLowerCase() === 'user')
+                  .map((acc, idx) => {
+                    const s = stats[acc.uid] || { percent: 0 };
+                    return (
+                       <tr key={acc.uid} style={{ backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                          <td className="py-3 px-4 text-center text-sm font-bold border-r" style={{ color: '#64748b', borderColor: '#f1f5f9' }}>{idx + 1}</td>
+                          <td className="py-3 px-4 text-sm font-black uppercase tracking-tight" style={{ color: '#1e293b' }}>{acc.username}</td>
+                          <td className="py-3 px-4 text-center">
+                             <div className="flex items-center gap-2 justify-center">
+                                <div className="w-16 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: '#e2e8f0' }}>
+                                   <div 
+                                      className="h-full"
+                                      style={{ 
+                                        width: `${s.percent}%`,
+                                        backgroundColor: s.percent === 100 ? '#10b981' : '#3b82f6'
+                                      }}
+                                   />
+                                </div>
+                                <span 
+                                  className="text-xs font-black"
+                                  style={{ color: s.percent === 100 ? '#047857' : '#1d4ed8' }}
+                                >
+                                  {s.percent}%
+                                </span>
+                             </div>
+                          </td>
+                       </tr>
+                    );
+                 })}
+              </tbody>
+           </table>
+        </div>
+
+        <div className="flex justify-between items-center pt-6 border-t" style={{ borderColor: '#f1f5f9' }}>
+           <p className="text-[9px] font-bold uppercase tracking-widest italic" style={{ color: '#94a3b8' }}>
+              Digital Signature: {Math.random().toString(36).substring(2, 10).toUpperCase()}
+           </p>
+           <p className="text-[9px] font-black uppercase tracking-widest" style={{ color: '#0f172a' }}>
+              Generated by ISMAN System
+           </p>
+        </div>
+      </div>
+
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex flex-wrap gap-4 justify-between items-center">
           <div className="flex items-center gap-4">
@@ -2672,16 +2769,6 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
                            <span className="text-[8px] font-black uppercase tracking-tight text-slate-400 font-mono">Menu VIII</span>
                            <div className="flex items-center gap-1">
                               <span className={`text-[9px] font-bold ${s.checks.heatmap ? 'text-emerald-700' : 'text-slate-400'}`}>Peta Risiko</span>
-                           </div>
-                        </div>
-                        <div 
-                          onMouseEnter={() => !s.checks.occurrence && setActiveTooltip({ accId: acc.uid, menuKey: 'occ', msg: s.reasons.occurrence })}
-                          onMouseLeave={() => setActiveTooltip(null)}
-                          className={`p-2 rounded-lg border flex flex-col gap-1 transition-all ${s.checks.occurrence ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-100 opacity-50 hover:bg-slate-100'}`}
-                        >
-                           <span className="text-[8px] font-black uppercase tracking-tight text-slate-400 font-mono">Menu IX</span>
-                           <div className="flex items-center gap-1">
-                              <span className={`text-[9px] font-bold ${s.checks.occurrence ? 'text-emerald-700' : 'text-slate-400'}`}>Monitoring</span>
                            </div>
                         </div>
                         <div 
