@@ -2128,11 +2128,11 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
 
     const allStats: Record<string, any> = {};
     
-    accounts.forEach(acc => {
-      // Helper to match risk level logic used in components
-      const getScoreAndLevel = (d: any, type: 'init' | 'res') => {
+    // Helper to calculate progress for a specific risk type
+    const calculateTypeStats = (acc: any, type: 'strategis' | 'operasional') => {
+      const getScoreAndLevel = (d: any, t: 'init' | 'res') => {
         let dVal = 0, kVal = 0;
-        if (type === 'init') {
+        if (t === 'init') {
           const activeD = (d.dampakScores || []).filter((v: number) => v > 0);
           const activeK = (d.kemungkinanScores || []).filter((v: number) => v > 0);
           dVal = activeD.length > 0 ? parseFloat((activeD.reduce((a: number, b: number) => a + b, 0) / activeD.length).toFixed(2)) : 0;
@@ -2148,23 +2148,19 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
 
       const baseRisks = risksState.filter(data => {
         const rt = data.riskType || 'strategis';
-        return data.createdByUid === acc.uid && rt === filterRiskType;
+        return data.createdByUid === acc.uid && rt === type;
       });
 
-      // Default sort (for Menu II, III, VI, VII, IX)
       const sortedByDefault = [...baseRisks].sort((a: any, b: any) => {
-        if (a.order !== undefined && b.order !== undefined) {
-          return a.order - b.order;
-        }
+        if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
         const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
         const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
         return dateA - dateB;
       });
       
-      const contextDocId = `risk_context_${acc.uid}_${filterRiskType}`;
+      const contextDocId = `risk_context_${acc.uid}_${type}`;
       const contextData = contextsState.find(d => d.id === contextDocId);
-      const reasons: Record<string, string> = {};
-
+      const reasons: Record<string, string> = { context: '', identification: '', analysis: '', residual: '', treatment: '', comm: '', pi: '' };
       const getRiskName = (r: any, idx: number) => r.risikoKode?.trim() || `R${idx + 1}`;
 
       // Menu I: Context
@@ -2183,219 +2179,86 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
       const hasContext = (!!contextData) && missingCtx.length === 0;
       if (!hasContext) reasons.context = "Kekurangan Menu I: " + missingCtx.join(', ');
 
-      // Menu II: Identifikasi (Sorted by Default)
       const missingIdent: string[] = [];
-      if (sortedByDefault.length === 0) {
-        missingIdent.push('Belum ada risiko');
-      } else {
-        sortedByDefault.forEach((r, idx) => {
-          const m: string[] = [];
-          if (!r.risikoUraian?.trim()) m.push('Uraian');
-          if (!r.risikoKode?.trim()) m.push('Kode');
-          if (!r.pemilik?.trim()) m.push('Pemilik');
-          
-          const sRowsRaw = r.subRows || [];
-          // Only use subRows if they actually have content, otherwise fallback to root fields
-          const hasFilledSubRows = sRowsRaw.some((s: any) => 
-            s.sebabUraian?.trim() || 
-            s.sebabSumber?.trim() || 
-            s.control?.trim() || 
-            s.dampakUraian?.trim() || 
-            s.dampakPihak?.trim()
-          );
-          const sRows = hasFilledSubRows ? sRowsRaw : [];
+      sortedByDefault.forEach((r, idx) => {
+        const m: string[] = [];
+        if (!r.risikoUraian?.trim()) m.push('Uraian');
+        if (!r.risikoKode?.trim()) m.push('Kode');
+        if (!r.pemilik?.trim()) m.push('Pemilik');
+        const sRowsRaw = r.subRows || [];
+        const hasFilledSubRows = sRowsRaw.some((s: any) => s.sebabUraian?.trim() || s.dampakUraian?.trim());
+        const sRows = hasFilledSubRows ? sRowsRaw : [];
+        if (sRows.length === 0) {
+          if (!r.sebabUraian?.trim()) m.push('Sebab');
+          if (!r.dampakUraian?.trim()) m.push('Dampak');
+        } else {
+          sRows.forEach((sub: any, sIdx: number) => {
+            if (sub.sebabUraian?.trim() || sub.dampakUraian?.trim()) {
+              if (!sub.sebabUraian?.trim()) m.push('Sebab' + (sRows.length > 1 ? ` B${sIdx+1}` : ''));
+              if (!sub.dampakUraian?.trim()) m.push('Dampak' + (sRows.length > 1 ? ` B${sIdx+1}` : ''));
+            }
+          });
+        }
+        if (m.length > 0) missingIdent.push(`${getRiskName(r, idx)}: ${m.join(', ')}`);
+      });
+      const hasIdentification = (baseRisks.length > 0) && missingIdent.length === 0;
+      if (!hasIdentification) reasons.identification = baseRisks.length === 0 ? "Belum ada risiko" : "Kekurangan Menu II: " + missingIdent.slice(0, 2).join('; ');
 
-          if (sRows.length === 0) {
-            // Fallback for old data or if somehow missing subRows
-            if (!r.sebabUraian?.trim()) m.push('Sebab');
-            if (!r.sebabSumber?.trim()) m.push('Sumber');
-            if (!r.control?.trim()) m.push('Kendali');
-            if (!r.dampakUraian?.trim()) m.push('Dampak');
-            if (!r.dampakPihak?.trim()) m.push('Pihak');
-          } else {
-            sRows.forEach((sub: any, sIdx: number) => {
-              // Only check subrows that have at least one field partially filled, to avoid nagging about extra empty subrows
-              const isPartiallyFilled = sub.sebabUraian?.trim() || sub.dampakUraian?.trim();
-              if (isPartiallyFilled) {
-                const sm: string[] = [];
-                if (!sub.sebabUraian?.trim()) sm.push('Sebab');
-                if (!sub.sebabSumber?.trim()) sm.push('Sumber');
-                if (!sub.control?.trim()) sm.push('Kendali');
-                if (!sub.dampakUraian?.trim()) sm.push('Dampak');
-                if (!sub.dampakPihak?.trim()) sm.push('Pihak');
-                if (sm.length > 0) {
-                  const suffix = sRows.length > 1 ? ` (B${sIdx + 1})` : '';
-                  sm.forEach(field => m.push(field + suffix));
-                }
-              }
-            });
-          }
-          
-          if (m.length > 0) missingIdent.push(`${getRiskName(r, idx)}: ${m.join(', ')}`);
-        });
-      }
-      const hasIdentification = (sortedByDefault.length > 0) && missingIdent.length === 0;
-      if (!hasIdentification) reasons.identification = "Kekurangan Menu II: " + missingIdent.slice(0, 2).join('; ') + (missingIdent.length > 2 ? '...' : '');
-
-      // Menu III: Analisis (Sorted by Default)
       const missingAnal: string[] = [];
-      if (sortedByDefault.length === 0) {
-        missingAnal.push('Data Kosong');
-      } else {
-        sortedByDefault.forEach((r, idx) => {
-          const dScores = r.dampakScores || [];
-          const kScores = r.kemungkinanScores || [];
-          const hasD = dScores.some((s: number) => s > 0);
-          const hasK = kScores.some((s: number) => s > 0);
-          if (!hasD || !hasK) {
-            missingAnal.push(`${getRiskName(r, idx)} blm dinilai`);
-          }
-        });
-      }
-      const hasAnalysis = (sortedByDefault.length > 0) && missingAnal.length === 0;
-      if (!hasAnalysis) reasons.analysis = "Kekurangan Menu III: " + missingAnal.join(', ');
+      sortedByDefault.forEach((r, idx) => {
+        const hasD = (r.dampakScores || []).some((s: number) => s > 0);
+        const hasK = (r.kemungkinanScores || []).some((s: number) => s > 0);
+        if (!hasD || !hasK) missingAnal.push(`${getRiskName(r, idx)} blm dinilai`);
+      });
+      const hasAnalysis = (baseRisks.length > 0) && missingAnal.length === 0;
+      if (!hasAnalysis) reasons.analysis = baseRisks.length === 0 ? "Data Kosong" : "Kekurangan Menu III: " + missingAnal.join(', ');
 
-      // Menu IV: Residual (SORTED BY INIT RISK LEVEL/SCORE)
       const missingRes: string[] = [];
-      if (baseRisks.length === 0) {
-        missingRes.push('Data Kosong');
-      } else {
-        const sortedForRes = [...baseRisks].map(r => {
-          const stats = getScoreAndLevel(r, 'init');
-          return { ...r, stats };
-        }).sort((a, b) => {
-          if (b.stats.level !== a.stats.level) return b.stats.level - a.stats.level;
-          return b.stats.score - a.stats.score;
-        });
-
-        sortedForRes.forEach((r, idx) => {
-          const m: string[] = [];
-          if (!(parseFloat(r.residualDampak || 0) > 0)) m.push('Nilai Dampak');
-          if (!(parseFloat(r.residualKemungkinan || 0) > 0)) m.push('Nilai Kemunk.');
-          if (!r.rtpControl?.trim()) m.push('RTP Kendali');
-          if (m.length > 0) missingRes.push(`${getRiskName(r, idx)}: ${m.join(', ')}`);
-        });
-      }
+      baseRisks.forEach((r, idx) => {
+        const m: string[] = [];
+        if (!(parseFloat(r.residualDampak || 0) > 0)) m.push('D');
+        if (!(parseFloat(r.residualKemungkinan || 0) > 0)) m.push('K');
+        if (!r.rtpControl?.trim()) m.push('RTP');
+        if (m.length > 0) missingRes.push(`${getRiskName(r, idx)}: ${m.join(', ')}`);
+      });
       const hasResidual = (baseRisks.length > 0) && missingRes.length === 0;
-      if (!hasResidual) reasons.residual = "Kekurangan Menu IV: " + missingRes.slice(0, 2).join('; ');
+      if (!hasResidual) reasons.residual = baseRisks.length === 0 ? "Data Kosong" : "Kekurangan Menu IV: " + missingRes.slice(0,2).join('; ');
 
-      // Menu V: Treatment (FILTERED resScore > 0, SORTED BY RES LEVEL/SCORE)
+      const treatmentRisks = baseRisks.map(r => ({ ...r, stats: getScoreAndLevel(r, 'res') })).filter(r => r.stats.level >= 3);
       const missingTreat: string[] = [];
-      const treatmentRisks = baseRisks.map(r => {
-        const stats = getScoreAndLevel(r, 'res');
-        return { ...r, stats };
-      }).filter(r => r.stats.score > 0 && r.stats.level >= 3);
+      treatmentRisks.forEach((r, idx) => {
+        if (!r.rtpAction?.trim()) missingTreat.push(`${getRiskName(r, idx)} Aksi`);
+      });
+      const hasTreatment = (baseRisks.length > 0) && hasAnalysis && hasResidual && (treatmentRisks.length === 0 || missingTreat.length === 0);
+      if (!hasTreatment) reasons.treatment = "Kekurangan Menu V: " + missingTreat.slice(0,2).join('; ');
 
-      if (treatmentRisks.length === 0 && baseRisks.length > 0) {
-        // Technically if no risks have residual score, Menu V is empty, but we might want to flag that Menu IV isn't done
-        // If hasResidual is false, treatment might not be reachable.
-      } else {
-        treatmentRisks.sort((a, b) => {
-          if (b.stats.level !== a.stats.level) return b.stats.level - a.stats.level;
-          return b.stats.score - a.stats.score;
-        });
-
-        treatmentRisks.forEach((r, idx) => {
-          const m: string[] = [];
-          if (!r.rtpAction?.trim()) m.push('Aksi');
-          if (!r.rtpPJ?.trim()) m.push('PJ');
-          if (!r.rtpDeadline?.trim()) m.push('Deadline');
-          if (m.length > 0) missingTreat.push(`${getRiskName(r, idx)}: ${m.join(', ')}`);
-        });
-      }
-      const hasTreatment = (baseRisks.length > 0) && hasAnalysis && hasResidual && (treatmentRisks.length === 0 || (treatmentRisks.length > 0 && missingTreat.length === 0));
-      if (!hasTreatment) reasons.treatment = (baseRisks.length > 0 && hasAnalysis && hasResidual && treatmentRisks.length === 0) ? "Lengkap: Tidak ada risiko yang memerlukan RTP" : "Kekurangan Menu V: " + missingTreat.slice(0, 2).join('; ');
-
-      // Menu VI: Komunikasi (Filtered, Sorted by Default)
+      const commRisks = baseRisks.map(r => ({ ...r, stats: getScoreAndLevel(r, 'res') })).filter(r => r.stats.level >= 3);
       const missingComm: string[] = [];
-      const commRisks = sortedByDefault.filter(r => {
-        const stats = getScoreAndLevel(r, 'res');
-        return stats.score > 0 && stats.level >= 3;
+      commRisks.forEach((r, idx) => {
+        if (!r.commMedia?.trim()) missingComm.push(`${getRiskName(r, idx)} Media`);
       });
+      const hasComm = (baseRisks.length > 0) && hasAnalysis && hasResidual && (commRisks.length === 0 || missingComm.length === 0);
+      if (!hasComm) reasons.comm = "Kekurangan Menu VI: " + missingComm.slice(0,2).join('; ');
 
-      if (commRisks.length === 0 && baseRisks.length > 0) {
-        // Empty
-      } else {
-        commRisks.forEach((r, idx) => {
-          const m: string[] = [];
-          if (!r.commMedia?.trim()) m.push('Media');
-          if (!r.commProvider?.trim()) m.push('Penyedia');
-          if (!r.commReceiver?.trim()) m.push('Penerima');
-          if (!r.commPlanTime?.trim()) m.push('Rencana');
-          if (m.length > 0) missingComm.push(`${getRiskName(r, idx)}: ${m.join(', ')}`);
-        });
-      }
-      const hasComm = (baseRisks.length > 0) && hasAnalysis && hasResidual && (commRisks.length === 0 || (commRisks.length > 0 && missingComm.length === 0));
-      if (!hasComm) reasons.comm = (baseRisks.length > 0 && hasAnalysis && hasResidual && commRisks.length === 0) ? "Lengkap: Tidak ada risiko yang memerlukan komunikasi" : "Kekurangan Menu VI: " + missingComm.slice(0, 2).join('; ');
-
-      // Menu VII: Monitoring PI (Filtered, Sorted by Default)
+      const piRisks = baseRisks.map(r => ({ ...r, stats: getScoreAndLevel(r, 'res') })).filter(r => r.stats.level >= 3);
       const missingPi: string[] = [];
-      const piRisks = sortedByDefault.filter(r => {
-        const stats = getScoreAndLevel(r, 'res');
-        return stats.score > 0 && stats.level >= 3;
+      piRisks.forEach((r, idx) => {
+        if (!r.monMethod?.trim()) missingPi.push(`${getRiskName(r, idx)} Metode`);
       });
+      const hasPiPlan = (baseRisks.length > 0) && hasAnalysis && hasResidual && (piRisks.length === 0 || missingPi.length === 0);
+      if (!hasPiPlan) reasons.pi = "Kekurangan Menu VII: " + missingPi.slice(0,2).join('; ');
 
-      if (piRisks.length === 0 && baseRisks.length > 0) {
-        // Empty
-      } else {
-        piRisks.forEach((r, idx) => {
-          const m: string[] = [];
-          if (!r.monMethod?.trim()) m.push('Metode');
-          if (!r.monPJ?.trim()) m.push('PJ');
-          if (!r.monPlanTime?.trim()) m.push('Rencana');
-          if (m.length > 0) missingPi.push(`${getRiskName(r, idx)}: ${m.join(', ')}`);
-        });
-      }
-      const hasPiPlan = (baseRisks.length > 0) && hasAnalysis && hasResidual && (piRisks.length === 0 || (piRisks.length > 0 && missingPi.length === 0));
-      if (!hasPiPlan) reasons.pi = (baseRisks.length > 0 && hasAnalysis && hasResidual && piRisks.length === 0) ? "Lengkap: Tidak ada risiko yang memerlukan Monitoring PI" : "Kekurangan Menu VII: " + missingPi.slice(0, 2).join('; ');
-
-      // Menu VIII: Heatmap (Automatic if Analysis & Residual done)
       const hasHeatmap = (baseRisks.length > 0) && hasAnalysis && hasResidual;
-
-      // Menu IX: Keterjadian (All risks, default sort)
-      const missingOcc: string[] = [];
-      if (sortedByDefault.length === 0) {
-        missingOcc.push('Daftar Risiko Kosong');
-      } else {
-        sortedByDefault.forEach((r, idx) => {
-          const m: string[] = [];
-          if (!r.eventDate?.trim()) m.push('Tgl');
-          if (!r.eventImpact?.trim()) m.push('Dampak');
-          if (!r.eventCause?.trim()) m.push('Sebab');
-          if (!r.rtpRealDate?.trim()) m.push('Realisasi RTP');
-          if (!r.rtpNotesContent?.trim()) m.push('Ket');
-          if (m.length > 0) missingOcc.push(`${getRiskName(r, idx)}: ${m.join(', ')}`);
-        });
-      }
-      const hasOccurrence = (sortedByDefault.length > 0) && missingOcc.length === 0;
-      // if (!hasOccurrence) reasons.occurrence = "Kekurangan Menu IX: " + missingOcc.slice(0, 2).join('; ');
-
       const hasFinalDoc = finalDocsState.some(d => (d.id === acc.uid || d.uid === acc.uid) && (d.status === 'verified' || d.status === 'Verified'));
 
-      const allSteps = [
-        hasContext, 
-        hasIdentification, 
-        hasAnalysis, 
-        hasResidual, 
-        hasTreatment, 
-        hasComm, 
-        hasPiPlan, 
-        hasHeatmap,
-        // hasOccurrence,
-        hasFinalDoc
-      ];
-      const completedCount = allSteps.filter(Boolean).length;
-      let finalPercent = Math.round((completedCount / 9) * 100);
-      
-      // Force 100% if verified
-      if (hasFinalDoc) {
-        finalPercent = 100;
-      }
+      const allSteps = [hasContext, hasIdentification, hasAnalysis, hasResidual, hasTreatment, hasComm, hasPiPlan, hasHeatmap, hasFinalDoc];
+      let finalPercent = Math.round((allSteps.filter(Boolean).length / 9) * 100);
+      if (hasFinalDoc) finalPercent = 100;
 
-      allStats[acc.uid] = {
+      return {
         total: baseRisks.length,
         percent: finalPercent,
-        reasons: reasons,
+        reasons,
         checks: {
           context: hasFinalDoc || hasContext,
           identification: hasFinalDoc || hasIdentification,
@@ -2405,9 +2268,18 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
           comm: hasFinalDoc || hasComm,
           pi: hasFinalDoc || hasPiPlan,
           heatmap: hasFinalDoc || hasHeatmap,
-          // occurrence: hasFinalDoc || hasOccurrence,
           finalDoc: hasFinalDoc
         }
+      };
+    };
+
+    accounts.forEach(acc => {
+      const sStats = calculateTypeStats(acc, 'strategis');
+      const oStats = calculateTypeStats(acc, 'operasional');
+      allStats[acc.uid] = {
+        ...(filterRiskType === 'strategis' ? sStats : oStats),
+        strategis: sStats,
+        operasional: oStats
       };
     });
     setStats(allStats);
@@ -2452,7 +2324,7 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
       const imgData = canvas.toDataURL('image/jpeg', 0.9);
       const link = document.createElement('a');
       link.href = imgData;
-      link.download = `Laporan_Progress_${filterRiskType}_${new Date().toISOString().split('T')[0]}.jpg`;
+      link.download = `Laporan_Progress_Gabungan_${new Date().toISOString().split('T')[0]}.jpg`;
       link.click();
     } catch (err) {
       console.error('Export error:', err);
@@ -2471,71 +2343,70 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
         id="progress-report-template" 
         style={{ display: 'none', position: 'fixed', left: '-9999px', width: '800px', padding: '40px', background: '#ffffff', color: '#0f172a' }}
       >
-        <div className="flex items-center justify-between mb-8 pb-6" style={{ borderBottom: '2px solid #0f172a' }}>
-           <div className="flex items-center gap-4">
-              <img src="/logo.png" alt="Logo" className="w-16 h-16 object-contain" crossOrigin="anonymous" />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '32px', paddingBottom: '24px', borderBottom: '2px solid #0f172a' }}>
+           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <img src="/logo.png" alt="Logo" style={{ width: '64px', height: '64px', objectFit: 'contain' }} crossOrigin="anonymous" />
               <div>
-                 <h1 className="text-3xl font-black leading-none tracking-tighter" style={{ color: '#0f172a' }}>ISMAN</h1>
-                 <p className="text-[10px] font-bold uppercase tracking-widest mt-1" style={{ color: '#64748b' }}>Integrated Risk Management System</p>
+                 <h1 style={{ fontSize: '30px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.05em', color: '#0f172a', margin: 0 }}>ISMAN</h1>
+                 <p style={{ fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px', color: '#64748b' }}>Integrated Risk Management System</p>
               </div>
            </div>
-           <div className="text-right">
-              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#94a3b8' }}>Laporan Monitoring</p>
-              <p className="text-xl font-black uppercase" style={{ color: '#0f172a' }}>Progres Pengisian</p>
+           <div style={{ textAlign: 'right' }}>
+              <p style={{ fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#94a3b8', margin: 0 }}>Laporan Monitoring</p>
+              <p style={{ fontSize: '20px', fontWeight: '900', textTransform: 'uppercase', color: '#0f172a', margin: 0 }}>Progres Pengisian</p>
            </div>
         </div>
 
-        <div className="flex justify-between items-end mb-6">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '24px' }}>
            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest leading-none mb-1" style={{ color: '#94a3b8' }}>Kategori Risiko</p>
+              <p style={{ fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: '1', marginBottom: '4px', color: '#94a3b8' }}>Kategori Risiko</p>
               <span 
-                className="px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider text-white"
-                style={{ backgroundColor: filterRiskType === 'strategis' ? '#2563eb' : '#059669' }}
+                style={{ display: 'inline-block', padding: '4px 12px', borderRadius: '9999px', fontSize: '10px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#ffffff', backgroundColor: '#1e293b' }}
               >
-                {filterRiskType}
+                GABUNGAN (RSO & ROO)
               </span>
            </div>
-           <div className="text-right">
-              <p className="text-[10px] font-bold uppercase tracking-widest leading-none mb-1" style={{ color: '#94a3b8' }}>Waktu Cetak</p>
-              <p className="text-sm font-bold" style={{ color: '#0f172a' }}>{new Date().toLocaleString('id-ID')}</p>
+           <div style={{ textAlign: 'right' }}>
+              <p style={{ fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: '1', marginBottom: '4px', color: '#94a3b8' }}>Waktu Cetak</p>
+              <p style={{ fontSize: '14px', fontWeight: '700', color: '#0f172a', margin: 0 }}>{new Date().toLocaleString('id-ID')}</p>
            </div>
         </div>
 
-        <div className="rounded-xl overflow-hidden mb-8" style={{ border: '1px solid #e2e8f0' }}>
-           <table className="w-full border-collapse">
+        <div style={{ borderRadius: '12px', overflow: 'hidden', marginBottom: '32px', border: '1px solid #e2e8f0' }}>
+           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
-                 <tr className="text-white" style={{ backgroundColor: '#0f172a' }}>
-                    <th className="py-3 px-4 text-center text-xs font-black uppercase tracking-widest w-16">No</th>
-                    <th className="py-3 px-4 text-left text-xs font-black uppercase tracking-widest">Nama OPD / Unit Kerja</th>
-                    <th className="py-3 px-4 text-center text-xs font-black uppercase tracking-widest w-32">Progress</th>
+                 <tr style={{ color: '#ffffff', backgroundColor: '#0f172a' }}>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: '10px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.1em', width: '48px' }}>No</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '10px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Nama OPD / Unit Kerja</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: '10px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.1em', width: '112px' }}>Progress RSO</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: '10px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.1em', width: '112px' }}>Progress ROO</th>
                  </tr>
               </thead>
               <tbody>
                  {sortedAccounts
                   .filter(acc => (acc.role || '').toLowerCase() === 'user')
                   .map((acc, idx) => {
-                    const s = stats[acc.uid] || { percent: 0 };
+                    const s = stats[acc.uid] || { strategis: { percent: 0 }, operasional: { percent: 0 } };
+                    const pRSO = s.strategis?.percent || 0;
+                    const pROO = s.operasional?.percent || 0;
                     return (
                        <tr key={acc.uid} style={{ backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
-                          <td className="py-3 px-4 text-center text-sm font-bold border-r" style={{ color: '#64748b', borderColor: '#f1f5f9' }}>{idx + 1}</td>
-                          <td className="py-3 px-4 text-sm font-black uppercase tracking-tight" style={{ color: '#1e293b' }}>{acc.username}</td>
-                          <td className="py-3 px-4 text-center">
-                             <div className="flex items-center gap-2 justify-center">
-                                <div className="w-16 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: '#e2e8f0' }}>
-                                   <div 
-                                      className="h-full"
-                                      style={{ 
-                                        width: `${s.percent}%`,
-                                        backgroundColor: s.percent === 100 ? '#10b981' : '#3b82f6'
-                                      }}
-                                   />
+                          <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '12px', fontWeight: '700', borderRight: '1px solid #f1f5f9', color: '#64748b' }}>{idx + 1}</td>
+                          <td style={{ padding: '12px 16px', fontSize: '12px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '-0.025em', color: '#1e293b' }}>{acc.username}</td>
+                          <td style={{ padding: '12px 16px', textAlign: 'center', borderLeft: '1px solid #f1f5f9' }}>
+                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
+                                <div style={{ width: '48px', height: '4px', borderRadius: '9999px', overflow: 'hidden', backgroundColor: '#e2e8f0' }}>
+                                   <div style={{ height: '100%', width: `${pRSO}%`, backgroundColor: pRSO === 100 ? '#10b981' : '#3b82f6' }} />
                                 </div>
-                                <span 
-                                  className="text-xs font-black"
-                                  style={{ color: s.percent === 100 ? '#047857' : '#1d4ed8' }}
-                                >
-                                  {s.percent}%
-                                </span>
+                                <span style={{ fontSize: '10px', fontWeight: '900', color: pRSO === 100 ? '#047857' : '#1d4ed8' }}>{pRSO}%</span>
+                             </div>
+                          </td>
+                          <td style={{ padding: '12px 16px', textAlign: 'center', borderLeft: '1px solid #f1f5f9' }}>
+                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
+                                <div style={{ width: '48px', height: '4px', borderRadius: '9999px', overflow: 'hidden', backgroundColor: '#e2e8f0' }}>
+                                   <div style={{ height: '100%', width: `${pROO}%`, backgroundColor: pROO === 100 ? '#10b981' : '#059669' }} />
+                                </div>
+                                <span style={{ fontSize: '10px', fontWeight: '900', color: pROO === 100 ? '#047857' : '#059669' }}>{pROO}%</span>
                              </div>
                           </td>
                        </tr>
@@ -2545,11 +2416,11 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
            </table>
         </div>
 
-        <div className="flex justify-between items-center pt-6 border-t" style={{ borderColor: '#f1f5f9' }}>
-           <p className="text-[9px] font-bold uppercase tracking-widest italic" style={{ color: '#94a3b8' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '24px', borderTop: '1px solid #f1f5f9' }}>
+           <p style={{ fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.1em', fontStyle: 'italic', color: '#94a3b8', margin: 0 }}>
               Digital Signature: {Math.random().toString(36).substring(2, 10).toUpperCase()}
            </p>
-           <p className="text-[9px] font-black uppercase tracking-widest" style={{ color: '#0f172a' }}>
+           <p style={{ fontSize: '9px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#0f172a', margin: 0 }}>
               Generated by ISMAN System
            </p>
         </div>
