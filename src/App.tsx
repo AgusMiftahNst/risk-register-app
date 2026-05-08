@@ -2288,6 +2288,17 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
   const sortedAccounts = useMemo(() => {
     let filtered = [...accounts].filter(acc => (acc.role || '').toLowerCase() !== 'administrator');
     
+    // Specifically for Admin, filter out "Biro" units and potentially other non-OPD units to reach ~26 main OPDs
+    if (user.role === 'Administrator') {
+      filtered = filtered.filter(acc => {
+        const name = (acc.username || '').toUpperCase();
+        if (name.includes('BIRO')) return false;
+        // The user specifically wants Inspektorat included and Biro excluded.
+        // Usually the 26 consists of Dinas, Badan, Satpol, Inspektorat, and RSUD.
+        return true;
+      });
+    }
+    
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       filtered = filtered.filter(acc => (acc.username || '').toLowerCase().includes(q));
@@ -2301,7 +2312,7 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
       const percentB = stats[b.uid]?.percent || 0;
       return sortOrder === 'desc' ? percentB - percentA : percentA - percentB;
     });
-  }, [accounts, stats, sortOrder, searchQuery]);
+  }, [accounts, stats, sortOrder, searchQuery, user.role]);
 
   const handleDownloadReport = async () => {
     setIsExporting(true);
@@ -2384,7 +2395,6 @@ function MonitoringProgressView({ user, onSelectUser }: { user: any, onSelectUse
               </thead>
               <tbody>
                  {sortedAccounts
-                  .filter(acc => (acc.role || '').toLowerCase() === 'user')
                   .map((acc, idx) => {
                     const s = stats[acc.uid] || { strategis: { percent: 0 }, operasional: { percent: 0 } };
                     const pRSO = s.strategis?.percent || 0;
@@ -6913,6 +6923,234 @@ function RiskOccurrenceMonitoringView({ user, isReadOnly, riskType }: { user: an
   );
 }
 
+function UserUploadView({ 
+  user, 
+  riskType, 
+  currentOpdLinks, 
+  uploadLinkToUse, 
+  finalDocs, 
+  saving, 
+  showDeclaration, 
+  setShowDeclaration, 
+  hasConfirmedUpload, 
+  setHasConfirmedUpload, 
+  onConfirm 
+}: { 
+  user: any, 
+  riskType: string, 
+  currentOpdLinks: any, 
+  uploadLinkToUse: string, 
+  finalDocs: any[], 
+  saving: boolean, 
+  showDeclaration: boolean, 
+  setShowDeclaration: (v: boolean) => void, 
+  hasConfirmedUpload: boolean, 
+  setHasConfirmedUpload: (v: boolean) => void, 
+  onConfirm: () => void 
+}) {
+  return (
+    <div className="max-w-4xl mx-auto space-y-6">
+      <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+        <div className="p-12 text-center space-y-6">
+          <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto border-4 border-blue-50">
+            <ShieldCheck size={40} />
+          </div>
+          
+          <div className="space-y-2">
+            <h3 className="text-2xl font-bold text-slate-800 uppercase tracking-tight italic">Penyerahan Dokumen Final</h3>
+            <p className="text-slate-500 max-w-lg mx-auto leading-relaxed text-sm">
+              Pastikan Anda telah mengunggah semua dokumen laporan final yang telah ditandatangani ke folder Google Drive yang disediakan di bawah ini.
+            </p>
+            <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl inline-block mt-4">
+              <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1 text-left">💡 Aturan Penamaan Dokumen:</p>
+              <p className="text-xs font-bold text-blue-700 text-left">
+                {riskType === 'operasional' ? 'ROO' : 'RSO'}_{user?.username || 'NAMA DINAS'}_2026
+              </p>
+              <p className="text-[9px] text-blue-500 mt-1 text-left italic">
+                *Pastikan nama file sesuai sebelum diunggah ke folder Drive.
+              </p>
+            </div>
+          </div>
+
+          <div className="max-w-2xl mx-auto pt-4">
+            {currentOpdLinks.driveLink || currentOpdLinks.uploadLink ? (
+              <div className="p-8 bg-slate-50 border border-slate-100 rounded-[32px] space-y-6 transition-all hover:shadow-xl hover:shadow-slate-200/50">
+                <div className="space-y-4">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Alur Penyerahan Dokumen</span>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center gap-3 text-center group hover:border-blue-300 transition-all">
+                      <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center font-black text-[10px] ring-4 ring-blue-50/50">1</div>
+                      <img src="https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg" className="w-10 h-10" alt="G-Drive" />
+                      <div>
+                        <p className="text-xs font-bold text-slate-700 uppercase tracking-tight">Upload Laporan</p>
+                        <p className="text-[9px] text-slate-400 italic mt-1 leading-tight">Gunakan link berikut untuk mengunggah dokumen Anda</p>
+                      </div>
+                      <a 
+                        href={uploadLinkToUse.startsWith('http') ? uploadLinkToUse : `https://${uploadLinkToUse}`} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="w-full group flex items-center justify-center gap-2 bg-slate-900 py-3 rounded-xl text-white font-black text-[10px] hover:bg-blue-600 transition-all uppercase tracking-widest shadow-lg shadow-slate-200"
+                      >
+                        UPLOAD DI SINI <ExternalLink size={12} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                      </a>
+                    </div>
+
+                    {(() => {
+                      const docData = finalDocs.find(d => d.id === user.uid);
+                      const status = docData?.status || 'none';
+                      const isSubmitted = status === 'pending' || status === 'verified';
+
+                      return (
+                        <div className={`p-6 rounded-2xl border flex flex-col items-center gap-3 text-center transition-all ${saving || isSubmitted ? 'bg-slate-50 border-slate-100' : 'bg-white border-slate-200 hover:border-emerald-300 shadow-sm'}`}>
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-[10px] ring-4 ${isSubmitted ? 'bg-slate-100 text-slate-400 ring-slate-100/50' : 'bg-emerald-50 text-emerald-600 ring-emerald-50/50'}`}>2</div>
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isSubmitted ? 'bg-slate-100 text-slate-300' : 'bg-emerald-50 text-emerald-500'}`}>
+                            {isSubmitted ? <ShieldCheck size={24} /> : <CheckCircle size={24} />}
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-700 uppercase tracking-tight">{isSubmitted ? 'Telah Dikonfirmasi' : 'Konfirmasi Selesai'}</p>
+                            <p className="text-[9px] text-slate-400 italic mt-1 leading-tight mb-4">
+                              {status === 'verified' ? 'Dokumen sudah divalidasi oleh admin.' : 
+                               status === 'pending' ? 'Menunggu admin memverifikasi folder Anda.' : 
+                               'Admin akan mulai memverifikasi setelah Anda mengonfirmasi'}
+                            </p>
+                          </div>
+
+                          {!isSubmitted && (
+                            <button 
+                              onClick={() => setShowDeclaration(true)}
+                              disabled={saving || isSubmitted}
+                              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-[10px] transition-all uppercase tracking-widest shadow-lg disabled:cursor-not-allowed ${
+                                isSubmitted ? 'bg-slate-200 text-slate-400 shadow-none' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-100'
+                              }`}
+                            >
+                              KONFIRMASI SEKARANG
+                            </button>
+                          )}
+
+                          {isSubmitted && (
+                            <button 
+                              disabled
+                              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-[10px] transition-all uppercase tracking-widest bg-slate-200 text-slate-400"
+                            >
+                              SUDAH DIKONFIRMASI
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                <AnimatePresence>
+                  {showDeclaration && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                      <motion.div 
+                        initial={{ scale: 0.95, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.95, opacity: 0 }}
+                        className="bg-white rounded-3xl shadow-2xl p-8 max-w-sm w-full text-center border border-slate-100"
+                      >
+                        <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                          <CheckCircle size={32} className="text-blue-500" />
+                        </div>
+                        <h3 className="text-xl font-bold text-slate-900 mb-2 uppercase italic tracking-tight">Konfirmasi Final</h3>
+                        <p className="text-slate-500 text-[11px] mb-6 font-medium italic leading-relaxed">
+                          "Apakah Anda yakin data yang diupload sudah benar? Data tidak dapat diubah setelah konfirmasi."
+                        </p>
+
+                        <div className="flex items-start gap-3 text-left bg-emerald-50 p-4 rounded-2xl border border-emerald-100 mb-6 cursor-pointer hover:bg-emerald-100 transition-colors" onClick={() => setHasConfirmedUpload(!hasConfirmedUpload)}>
+                          <div className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${hasConfirmedUpload ? 'bg-emerald-600 border-emerald-600' : 'bg-white border-emerald-300'}`}>
+                            {hasConfirmedUpload && <Check size={14} className="text-white" />}
+                          </div>
+                          <span className="text-[10px] text-emerald-800 font-bold leading-tight uppercase tracking-tight">SAYA MENYATAKAN BAHWA SUDAH UPLOAD DOKUMEN FINAL KE FOLDER GOOGLE DRIVE DENGAN BENAR</span>
+                        </div>
+
+                        <div className="flex gap-3">
+                          <button 
+                            onClick={() => { setShowDeclaration(false); setHasConfirmedUpload(false); }}
+                            className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-[11px] uppercase tracking-wider hover:bg-slate-200 transition-colors"
+                          >
+                            Batal
+                          </button>
+                          <button 
+                            onClick={onConfirm}
+                            disabled={saving || !hasConfirmedUpload}
+                            className="flex-[1.5] px-4 py-3 bg-emerald-600 text-white rounded-xl font-black text-[11px] uppercase tracking-wider hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-100 disabled:opacity-50"
+                          >
+                            {saving ? 'MEMPROSES...' : 'YA, KONFIRMASI'}
+                          </button>
+                        </div>
+                      </motion.div>
+                    </div>
+                  )}
+                </AnimatePresence>
+
+                {(() => {
+                  const docData = finalDocs.find(d => d.id === user.uid);
+                  if (!docData) return null;
+
+                  const status = docData.status;
+
+                  return (
+                    <div className="pt-8 border-t border-slate-200/50 flex flex-col items-center gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                      <div className="flex items-center gap-1.5">
+                         <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Status Verifikasi</span>
+                         <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                      </div>
+                      
+                      <div className={`px-10 py-4 rounded-[24px] border-2 flex items-center gap-3 font-black uppercase tracking-widest text-sm shadow-xl ${
+                        status === 'verified' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 shadow-emerald-100/50' :
+                        status === 'rejected' ? 'bg-rose-50 border-rose-200 text-rose-700 shadow-rose-100/50' :
+                        'bg-blue-50 border-blue-200 text-blue-700 shadow-blue-100/50'
+                      }`}>
+                         {status === 'verified' ? <Check size={20} className="stroke-[3]" /> : status === 'rejected' ? <X size={20} className="stroke-[3]" /> : <div className="w-3 h-3 bg-blue-500 rounded-full animate-ping" />}
+                         {status === 'verified' ? 'Sudah Terverifikasi' : status === 'rejected' ? 'Ditolak / Perlu Revisi' : 'Menunggu Verifikasi'}
+                      </div>
+                      
+                      {docData.note && status === 'rejected' && (
+                        <div className="p-4 bg-rose-50 border border-rose-100 text-rose-700 rounded-2xl text-[10px] font-black uppercase tracking-wider max-w-sm italic text-center leading-relaxed">
+                          Catatan Admin: "{docData.note}"
+                        </div>
+                      )}
+
+                      {status === 'pending' && (
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-center animate-pulse">
+                          Dokumen Anda sedang dalam antrean pemeriksaan
+                        </p>
+                      )}
+                      
+                      {status === 'verified' && (
+                        <div className="flex flex-col items-center gap-1">
+                          <p className="text-[10px] text-emerald-600 font-black uppercase tracking-widest">Proses Selesai</p>
+                          <p className="text-[10px] text-slate-400 font-medium italic">Laporan final telah divalidasi oleh Verifikator.</p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div className="p-12 bg-amber-50 border border-amber-100 rounded-[32px] text-center space-y-4">
+                <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center text-amber-500 mx-auto">
+                  <ShieldAlert size={32} />
+                </div>
+                <div className="space-y-1">
+                  <p className="font-bold text-amber-900">Folder Belum Tersedia</p>
+                  <p className="text-xs text-amber-700 leading-relaxed max-w-xs mx-auto">
+                    Admin belum mengatur folder Google Drive khusus untuk OPD Anda. Silakan hubungi Administrator untuk meminta link folder.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FinalDocumentView({ user, isAdmin, isOperator, riskType }: { user: any, isAdmin: boolean, isOperator: boolean, riskType: 'strategis' | 'operasional' }) {
   const [docLink, setDocLink] = useState('');
   const [masterLink, setMasterLink] = useState('');
@@ -6924,7 +7162,7 @@ function FinalDocumentView({ user, isAdmin, isOperator, riskType }: { user: any,
   const [editingOpdId, setEditingOpdId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [finalDocs, setFinalDocs] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'verification' | 'config'>('verification');
+  const [activeTab, setActiveTab] = useState<'verification' | 'config' | 'upload'>('verification');
   const isSuper = isAdmin || isOperator;
 
   useEffect(() => {
@@ -7096,7 +7334,7 @@ function FinalDocumentView({ user, isAdmin, isOperator, riskType }: { user: any,
     return (
       <div className="space-y-6">
         {/* Tab Navigation for Admin/Operator */}
-        {isAdmin && (
+        {(isAdmin || isOperator) && (
           <div className="flex gap-2 p-1 bg-slate-100 rounded-2xl w-fit mb-6">
             <button 
               onClick={() => setActiveTab('verification')}
@@ -7104,12 +7342,22 @@ function FinalDocumentView({ user, isAdmin, isOperator, riskType }: { user: any,
             >
               Verifikasi Dokumen
             </button>
-            <button 
-              onClick={() => setActiveTab('config')}
-              className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'config' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              Konfigurasi Folder
-            </button>
+            {isAdmin && (
+              <button 
+                onClick={() => setActiveTab('config')}
+                className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'config' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Konfigurasi Folder
+              </button>
+            )}
+            {isOperator && (
+              <button 
+                onClick={() => setActiveTab('upload')}
+                className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'upload' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Upload Dokumen Saya
+              </button>
+            )}
           </div>
         )}
 
@@ -7223,6 +7471,20 @@ function FinalDocumentView({ user, isAdmin, isOperator, riskType }: { user: any,
                 </div>
               </div>
           </div>
+        ) : activeTab === 'upload' ? (
+          <UserUploadView 
+            user={user} 
+            riskType={riskType} 
+            currentOpdLinks={currentOpdLinks} 
+            uploadLinkToUse={uploadLinkToUse} 
+            finalDocs={finalDocs} 
+            saving={saving} 
+            showDeclaration={showDeclaration} 
+            setShowDeclaration={setShowDeclaration} 
+            hasConfirmedUpload={hasConfirmedUpload} 
+            setHasConfirmedUpload={setHasConfirmedUpload} 
+            onConfirm={handleConfirmUpload} 
+          />
         ) : (
           <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm p-8">
             <div className="flex justify-between items-start mb-8">
@@ -7342,205 +7604,19 @@ function FinalDocumentView({ user, isAdmin, isOperator, riskType }: { user: any,
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
-        <div className="p-12 text-center space-y-6">
-          <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto border-4 border-blue-50">
-            <ShieldCheck size={40} />
-          </div>
-          
-          <div className="space-y-2">
-            <h3 className="text-2xl font-bold text-slate-800 uppercase tracking-tight italic">Penyerahan Dokumen Final</h3>
-            <p className="text-slate-500 max-w-lg mx-auto leading-relaxed text-sm">
-              Pastikan Anda telah mengunggah semua dokumen laporan final yang telah ditandatangani ke folder Google Drive yang disediakan di bawah ini.
-            </p>
-            <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl inline-block mt-4">
-              <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1 text-left">💡 Aturan Penamaan Dokumen:</p>
-              <p className="text-xs font-bold text-blue-700 text-left">
-                {riskType === 'operasional' ? 'ROO' : 'RSO'}_{user?.username || 'NAMA DINAS'}_2026
-              </p>
-              <p className="text-[9px] text-blue-500 mt-1 text-left italic">
-                *Pastikan nama file sesuai sebelum diunggah ke folder Drive.
-              </p>
-            </div>
-          </div>
-
-          <div className="max-w-2xl mx-auto pt-4">
-            {currentOpdLinks.driveLink || currentOpdLinks.uploadLink ? (
-              <div className="p-8 bg-slate-50 border border-slate-100 rounded-[32px] space-y-6 transition-all hover:shadow-xl hover:shadow-slate-200/50">
-                <div className="space-y-4">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Alur Penyerahan Dokumen</span>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center gap-3 text-center group hover:border-blue-300 transition-all">
-                      <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center font-black text-[10px] ring-4 ring-blue-50/50">1</div>
-                      <img src="https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg" className="w-10 h-10" alt="G-Drive" />
-                      <div>
-                        <p className="text-xs font-bold text-slate-700 uppercase tracking-tight">Upload Laporan</p>
-                        <p className="text-[9px] text-slate-400 italic mt-1 leading-tight">Gunakan link berikut untuk mengunggah dokumen Anda</p>
-                      </div>
-                      <a 
-                        href={uploadLinkToUse.startsWith('http') ? uploadLinkToUse : `https://${uploadLinkToUse}`} 
-                        target="_blank" 
-                        rel="noreferrer"
-                        className="w-full group flex items-center justify-center gap-2 bg-slate-900 py-3 rounded-xl text-white font-black text-[10px] hover:bg-blue-600 transition-all uppercase tracking-widest shadow-lg shadow-slate-200"
-                      >
-                        UPLOAD DI SINI <ExternalLink size={12} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-                      </a>
-                    </div>
-
-                    {(() => {
-                      const docData = finalDocs.find(d => d.id === user.uid);
-                      const status = docData?.status || 'none';
-                      const isSubmitted = status === 'pending' || status === 'verified';
-
-                      return (
-                        <div className={`p-6 rounded-2xl border flex flex-col items-center gap-3 text-center transition-all ${saving || isSubmitted ? 'bg-slate-50 border-slate-100' : 'bg-white border-slate-200 hover:border-emerald-300 shadow-sm'}`}>
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-[10px] ring-4 ${isSubmitted ? 'bg-slate-100 text-slate-400 ring-slate-100/50' : 'bg-emerald-50 text-emerald-600 ring-emerald-50/50'}`}>2</div>
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isSubmitted ? 'bg-slate-100 text-slate-300' : 'bg-emerald-50 text-emerald-500'}`}>
-                            {isSubmitted ? <ShieldCheck size={24} /> : <CheckCircle size={24} />}
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-700 uppercase tracking-tight">{isSubmitted ? 'Telah Dikonfirmasi' : 'Konfirmasi Selesai'}</p>
-                            <p className="text-[9px] text-slate-400 italic mt-1 leading-tight mb-4">
-                              {status === 'verified' ? 'Dokumen sudah divalidasi oleh admin.' : 
-                               status === 'pending' ? 'Menunggu admin memverifikasi folder Anda.' : 
-                               'Admin akan mulai memverifikasi setelah Anda mengonfirmasi'}
-                            </p>
-                          </div>
-
-                          {!isSubmitted && (
-                            <button 
-                              onClick={() => setShowDeclaration(true)}
-                              disabled={saving || isSubmitted}
-                              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-[10px] transition-all uppercase tracking-widest shadow-lg disabled:cursor-not-allowed ${
-                                isSubmitted ? 'bg-slate-200 text-slate-400 shadow-none' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-100'
-                              }`}
-                            >
-                              KONFIRMASI SEKARANG
-                            </button>
-                          )}
-
-                          {isSubmitted && (
-                            <button 
-                              disabled
-                              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-[10px] transition-all uppercase tracking-widest bg-slate-200 text-slate-400"
-                            >
-                              SUDAH DIKONFIRMASI
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-
-                <AnimatePresence>
-                  {showDeclaration && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-                      <motion.div 
-                        initial={{ scale: 0.95, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0.95, opacity: 0 }}
-                        className="bg-white rounded-3xl shadow-2xl p-8 max-w-sm w-full text-center border border-slate-100"
-                      >
-                        <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                          <CheckCircle size={32} className="text-blue-500" />
-                        </div>
-                        <h3 className="text-xl font-bold text-slate-900 mb-2 uppercase italic tracking-tight">Konfirmasi Final</h3>
-                        <p className="text-slate-500 text-[11px] mb-6 font-medium italic leading-relaxed">
-                          "Apakah Anda yakin data yang diupload sudah benar? Data tidak dapat diubah setelah konfirmasi."
-                        </p>
-
-                        <div className="flex items-start gap-3 text-left bg-emerald-50 p-4 rounded-2xl border border-emerald-100 mb-6 cursor-pointer hover:bg-emerald-100 transition-colors" onClick={() => setHasConfirmedUpload(!hasConfirmedUpload)}>
-                          <div className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${hasConfirmedUpload ? 'bg-emerald-600 border-emerald-600' : 'bg-white border-emerald-300'}`}>
-                            {hasConfirmedUpload && <Check size={14} className="text-white" />}
-                          </div>
-                          <span className="text-[10px] text-emerald-800 font-bold leading-tight uppercase tracking-tight">SAYA MENYATAKAN BAHWA SUDAH UPLOAD DOKUMEN FINAL KE FOLDER GOOGLE DRIVE DENGAN BENAR</span>
-                        </div>
-
-                        <div className="flex gap-3">
-                          <button 
-                            onClick={() => { setShowDeclaration(false); setHasConfirmedUpload(false); }}
-                            className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-[11px] uppercase tracking-wider hover:bg-slate-200 transition-colors"
-                          >
-                            Batal
-                          </button>
-                          <button 
-                            onClick={handleConfirmUpload}
-                            disabled={saving || !hasConfirmedUpload}
-                            className="flex-[1.5] px-4 py-3 bg-emerald-600 text-white rounded-xl font-black text-[11px] uppercase tracking-wider hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-100 disabled:opacity-50"
-                          >
-                            {saving ? 'MEMPROSES...' : 'YA, KONFIRMASI'}
-                          </button>
-                        </div>
-                      </motion.div>
-                    </div>
-                  )}
-                </AnimatePresence>
-
-                {(() => {
-                  const docData = finalDocs.find(d => d.id === user.uid);
-                  if (!docData) return null; // Only show status section if they've confirmed at least once
-
-                  const status = docData.status;
-
-                  return (
-                    <div className="pt-8 border-t border-slate-200/50 flex flex-col items-center gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                      <div className="flex items-center gap-1.5">
-                         <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Status Verifikasi</span>
-                         <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-                      </div>
-                      
-                      <div className={`px-10 py-4 rounded-[24px] border-2 flex items-center gap-3 font-black uppercase tracking-widest text-sm shadow-xl ${
-                        status === 'verified' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 shadow-emerald-100/50' :
-                        status === 'rejected' ? 'bg-rose-50 border-rose-200 text-rose-700 shadow-rose-100/50' :
-                        'bg-blue-50 border-blue-200 text-blue-700 shadow-blue-100/50'
-                      }`}>
-                         {status === 'verified' ? <Check size={20} className="stroke-[3]" /> : status === 'rejected' ? <X size={20} className="stroke-[3]" /> : <div className="w-3 h-3 bg-blue-500 rounded-full animate-ping" />}
-                         {status === 'verified' ? 'Sudah Terverifikasi' : status === 'rejected' ? 'Ditolak / Perlu Revisi' : 'Menunggu Verifikasi'}
-                      </div>
-                      
-                      {docData.note && status === 'rejected' && (
-                        <div className="p-4 bg-rose-50 border border-rose-100 text-rose-700 rounded-2xl text-[10px] font-black uppercase tracking-wider max-w-sm italic text-center leading-relaxed">
-                          Catatan Admin: "{docData.note}"
-                        </div>
-                      )}
-
-                      {status === 'pending' && (
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-center animate-pulse">
-                          Dokumen Anda sedang dalam antrean pemeriksaan
-                        </p>
-                      )}
-                      
-                      {status === 'verified' && (
-                        <div className="flex flex-col items-center gap-1">
-                          <p className="text-[10px] text-emerald-600 font-black uppercase tracking-widest">Proses Selesai</p>
-                          <p className="text-[10px] text-slate-400 font-medium italic">Laporan final telah divalidasi oleh Verifikator.</p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-            ) : (
-              <div className="p-12 bg-amber-50 border border-amber-100 rounded-[32px] text-center space-y-4">
-                <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center text-amber-500 mx-auto">
-                  <ShieldAlert size={32} />
-                </div>
-                <div className="space-y-1">
-                  <p className="font-bold text-amber-900">Folder Belum Tersedia</p>
-                  <p className="text-xs text-amber-700 leading-relaxed max-w-xs mx-auto">
-                    Admin belum mengatur folder Google Drive khusus untuk OPD Anda. Silakan hubungi Administrator untuk meminta link folder.
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+    <UserUploadView 
+      user={user} 
+      riskType={riskType} 
+      currentOpdLinks={currentOpdLinks} 
+      uploadLinkToUse={uploadLinkToUse} 
+      finalDocs={finalDocs} 
+      saving={saving} 
+      showDeclaration={showDeclaration} 
+      setShowDeclaration={setShowDeclaration} 
+      hasConfirmedUpload={hasConfirmedUpload} 
+      setHasConfirmedUpload={setHasConfirmedUpload} 
+      onConfirm={handleConfirmUpload} 
+    />
   );
 }
 
